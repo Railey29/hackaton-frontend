@@ -4,7 +4,6 @@ import React, { useState, useRef, useEffect } from "react";
 import {
   Message,
   INITIAL_MESSAGES,
-  RESPONSE_POOL,
   DEFAULT_QUICK_REPLIES,
   AFTER_RESPONSE_QUICK_REPLIES,
 } from "@/lib/chatData";
@@ -27,17 +26,11 @@ export default function ChatPage() {
   const [messages, setMessages] = useState<Message[]>(INITIAL_MESSAGES);
   const [inputText, setInputText] = useState("");
   const [isTyping, setIsTyping] = useState(false);
-  const [quickReplies, setQuickReplies] = useState<string[]>(
-    DEFAULT_QUICK_REPLIES,
-  );
-  const [selectedQuickReply, setSelectedQuickReply] = useState<
-    string | undefined
-  >();
-
+  const [quickReplies, setQuickReplies] = useState<string[]>(DEFAULT_QUICK_REPLIES);
+  const [selectedQuickReply, setSelectedQuickReply] = useState<string | undefined>();
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [isRightPanelOpen, setIsRightPanelOpen] = useState(false);
 
-  const poolIndexRef = useRef(0);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
@@ -58,9 +51,9 @@ export default function ChatPage() {
     setIsRightPanelOpen(false);
   };
 
-  const handleSend = (overrideText?: string) => {
+  const handleSend = async (overrideText?: string) => {
     const textToSend = overrideText || inputText.trim();
-    if (!textToSend) return;
+    if (!textToSend || isTyping) return;
 
     const userMsg: Message = {
       id: Date.now().toString(),
@@ -75,23 +68,38 @@ export default function ChatPage() {
 
     setIsTyping(true);
 
-    setTimeout(() => {
-      setIsTyping(false);
-      const botResponseText =
-        RESPONSE_POOL[poolIndexRef.current % RESPONSE_POOL.length];
-      poolIndexRef.current += 1;
+    try {
+      const res = await fetch("/api/gemini", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ message: textToSend }),
+      });
+
+      const data = await res.json();
 
       const botMsg: Message = {
         id: (Date.now() + 1).toString(),
         sender: "bot",
-        text: botResponseText,
+        text: data.reply ?? "I'm here. Tell me more.",
       };
       setMessages((prev) => [...prev, botMsg]);
 
+    } catch (err) {
+      console.error("Gemini error:", err);
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: (Date.now() + 1).toString(),
+          sender: "bot",
+          text: "Something went wrong. I'm still here — try again?",
+        },
+      ]);
+    } finally {
+      setIsTyping(false);
       setTimeout(() => {
         setQuickReplies(AFTER_RESPONSE_QUICK_REPLIES);
       }, 300);
-    }, 1500);
+    }
   };
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -103,7 +111,7 @@ export default function ChatPage() {
 
   const handleQuickReplySelect = (reply: string) => {
     setSelectedQuickReply(reply);
-    setInputText(reply);
+    handleSend(reply);
   };
 
   const handleNewConversation = () => {
@@ -263,10 +271,7 @@ export default function ChatPage() {
                   value={inputText}
                   onChange={(e) => {
                     setInputText(e.target.value);
-                    if (
-                      selectedQuickReply &&
-                      e.target.value !== selectedQuickReply
-                    ) {
+                    if (selectedQuickReply && e.target.value !== selectedQuickReply) {
                       setSelectedQuickReply(undefined);
                     }
                   }}
@@ -289,8 +294,7 @@ export default function ChatPage() {
             </div>
 
             <div className="mt-[6px] text-center text-[10px] text-stone-400 uppercase tracking-widest bg-stone-50 py-[3px] rounded">
-              AlphaBot is an AI companion · Not a crisis service · Always
-              anonymous
+              AlphaBot is an AI companion · Not a crisis service · Always anonymous
             </div>
           </div>
         </main>
@@ -301,9 +305,7 @@ export default function ChatPage() {
             "h-full bg-stone-50 border-l border-sage-200 z-30 transition-transform duration-300 ease-in-out",
             "xl:static xl:translate-x-0 xl:w-[220px] xl:shrink-0",
             "max-xl:fixed max-xl:top-0 max-xl:right-0 max-xl:w-[260px]",
-            isRightPanelOpen
-              ? "max-xl:translate-x-0"
-              : "max-xl:translate-x-full",
+            isRightPanelOpen ? "max-xl:translate-x-0" : "max-xl:translate-x-full",
           ].join(" ")}
         >
           <div className="xl:hidden flex justify-start px-3 pt-3 pb-1">
@@ -315,7 +317,6 @@ export default function ChatPage() {
               <X size={14} />
             </button>
           </div>
-
           <RightPanel />
         </aside>
       </div>
