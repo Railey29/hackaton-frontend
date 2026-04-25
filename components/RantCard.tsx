@@ -136,6 +136,8 @@ export function RantCard({ rant, currentUserId }: RantCardProps) {
   const [commentInput, setCommentInput] = useState("");
   const [editing, setEditing] = useState(false);
   const [editText, setEditText] = useState(rant.content);
+  const [editingCommentId, setEditingCommentId] = useState<string | null>(null);
+  const [editingCommentText, setEditingCommentText] = useState("");
   const [bodyText, setBodyText] = useState(rant.content);
   const [hidden, setHidden] = useState(
     (rant.hidden_by ?? []).includes(currentUserId),
@@ -267,6 +269,76 @@ export function RantCard({ rant, currentUserId }: RantCardProps) {
       setCommentCount((c) => c - 1);
     } catch {
       console.error("Failed to delete comment");
+    }
+  }
+
+  async function handleLikeComment(comment_id: string) {
+    setComments((prev) =>
+      prev.map((c) => {
+        if (c._id !== comment_id) return c;
+        const alreadyLiked = c.likes.includes(currentUserId);
+        return {
+          ...c,
+          likes: alreadyLiked
+            ? c.likes.filter((id) => id !== currentUserId)
+            : [...c.likes, currentUserId],
+        };
+      }),
+    );
+    try {
+      await fetch(`/api/comments/${comment_id}/like?user_id=${currentUserId}`, {
+        method: "POST",
+      });
+    } catch {
+      // revert on error
+      setComments((prev) =>
+        prev.map((c) => {
+          if (c._id !== comment_id) return c;
+          const alreadyLiked = c.likes.includes(currentUserId);
+          return {
+            ...c,
+            likes: alreadyLiked
+              ? c.likes.filter((id) => id !== currentUserId)
+              : [...c.likes, currentUserId],
+          };
+        }),
+      );
+    }
+  }
+
+  function handleStartEditComment(comment: Comment) {
+    setEditingCommentId(comment._id);
+    setEditingCommentText(comment.content);
+  }
+
+  function handleCancelEditComment() {
+    setEditingCommentId(null);
+    setEditingCommentText("");
+  }
+
+  async function handleSaveEditComment(comment_id: string) {
+    if (!editingCommentText.trim()) return;
+    try {
+      const res = await fetch(`/api/comments/${comment_id}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          content: editingCommentText.trim(),
+          user_id: currentUserId,
+        }),
+      });
+      if (!res.ok) return;
+      setComments((prev) =>
+        prev.map((c) =>
+          c._id === comment_id
+            ? { ...c, content: editingCommentText.trim() }
+            : c,
+        ),
+      );
+      setEditingCommentId(null);
+      setEditingCommentText("");
+    } catch {
+      console.error("Failed to edit comment");
     }
   }
 
@@ -407,18 +479,63 @@ export function RantCard({ rant, currentUserId }: RantCardProps) {
                       ? "You"
                       : `user_${c.user_id?.slice(-4)}`}
                   </div>
-                  <div className="text-sm text-stone-500 mt-0.5 leading-snug">
-                    {c.content}
-                  </div>
+                  {editingCommentId === c._id ? (
+                    <div className="mt-1">
+                      <textarea
+                        autoFocus
+                        value={editingCommentText}
+                        onChange={(e) => setEditingCommentText(e.target.value)}
+                        className="w-full text-sm border border-stone-200 rounded-lg px-2 py-1.5 outline-none focus:border-sage-300 resize-none transition-colors"
+                        rows={2}
+                      />
+                      <div className="flex gap-2 mt-1.5">
+                        <button
+                          onClick={() => handleSaveEditComment(c._id)}
+                          disabled={!editingCommentText.trim()}
+                          className="text-xs text-white bg-sage-500 hover:bg-sage-600 disabled:opacity-40 rounded-full px-3 py-1 transition-colors"
+                        >
+                          Save
+                        </button>
+                        <button
+                          onClick={handleCancelEditComment}
+                          className="text-xs text-stone-400 hover:text-stone-600 border border-stone-200 rounded-full px-3 py-1 transition-colors"
+                        >
+                          Cancel
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    <>
+                      <div className="text-sm text-stone-500 mt-0.5 leading-snug">
+                        {c.content}
+                      </div>
+                      <button
+                        onClick={() => handleLikeComment(c._id)}
+                        className={`flex items-center gap-1 mt-1.5 text-xs transition-colors ${c.likes.includes(currentUserId) ? "text-orange-500" : "text-stone-400 hover:text-stone-600"}`}
+                      >
+                        <HeartIcon filled={c.likes.includes(currentUserId)} />
+                        {c.likes.length > 0 && <span>{c.likes.length}</span>}
+                      </button>
+                    </>
+                  )}
                 </div>
-                {c.user_id === currentUserId && (
-                  <button
-                    onClick={() => handleDeleteComment(c._id)}
-                    className="text-stone-300 hover:text-red-400 transition-colors text-xs mt-1 px-1"
-                    title="Delete comment"
-                  >
-                    ✕
-                  </button>
+                {c.user_id === currentUserId && editingCommentId !== c._id && (
+                  <div className="flex flex-col gap-1 mt-1">
+                    <button
+                      onClick={() => handleStartEditComment(c)}
+                      className="text-stone-300 hover:text-stone-500 transition-colors p-0.5 rounded"
+                      title="Edit comment"
+                    >
+                      <EditIcon />
+                    </button>
+                    <button
+                      onClick={() => handleDeleteComment(c._id)}
+                      className="text-stone-300 hover:text-red-400 transition-colors p-0.5 rounded"
+                      title="Delete comment"
+                    >
+                      <TrashIcon />
+                    </button>
+                  </div>
                 )}
               </div>
             ))
