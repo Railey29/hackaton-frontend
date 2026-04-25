@@ -176,7 +176,6 @@ export function RantCard({ rant, currentUserId }: RantCardProps) {
         method: "POST",
       });
     } catch {
-      // revert on error
       setLiked(!newLiked);
       setFeltCount(newLiked ? feltCount : feltCount + 1);
     }
@@ -211,9 +210,7 @@ export function RantCard({ rant, currentUserId }: RantCardProps) {
     try {
       const res = await fetch(
         `/api/post/${rant._id}?user_id=${currentUserId}`,
-        {
-          method: "DELETE",
-        },
+        { method: "DELETE" },
       );
       if (!res.ok) return;
       setDeleted(true);
@@ -260,9 +257,7 @@ export function RantCard({ rant, currentUserId }: RantCardProps) {
     try {
       const res = await fetch(
         `/api/comments/${comment_id}?user_id=${currentUserId}`,
-        {
-          method: "DELETE",
-        },
+        { method: "DELETE" },
       );
       if (!res.ok) return;
       setComments((prev) => prev.filter((c) => c._id !== comment_id));
@@ -290,7 +285,6 @@ export function RantCard({ rant, currentUserId }: RantCardProps) {
         method: "POST",
       });
     } catch {
-      // revert on error
       setComments((prev) =>
         prev.map((c) => {
           if (c._id !== comment_id) return c;
@@ -344,10 +338,24 @@ export function RantCard({ rant, currentUserId }: RantCardProps) {
 
   if (deleted) return null;
 
+  // ── Hidden state: totally collapsed, content invisible ───────────────────
+  if (hidden) {
+    return (
+      <div className="bg-stone-50 rounded-xl border border-stone-100 px-4 py-3 flex items-center justify-between">
+        <span className="text-xs text-stone-300 italic">Post hidden</span>
+        <button
+          onClick={handleHide}
+          className="flex items-center gap-1.5 text-[11px] text-stone-300 hover:text-stone-500 transition-colors"
+        >
+          <EyeIcon />
+          <span>Show</span>
+        </button>
+      </div>
+    );
+  }
+
   return (
-    <div
-      className={`bg-white rounded-xl border border-stone-200 p-4 transition-opacity ${hidden ? "opacity-40" : "opacity-100"}`}
-    >
+    <div className="bg-white rounded-xl border border-stone-200 p-4">
       {/* Header */}
       <div className="flex items-start gap-3 mb-3">
         <div className="w-9 h-9 rounded-full bg-sage-200 flex items-center justify-center text-xs font-medium text-sage-800 shrink-0">
@@ -399,10 +407,6 @@ export function RantCard({ rant, currentUserId }: RantCardProps) {
         </p>
       )}
 
-      {hidden && (
-        <p className="text-xs text-stone-400 text-center mb-3">Post hidden</p>
-      )}
-
       {/* Action Bar */}
       <div className="flex items-center gap-3 pt-3 border-t border-stone-100">
         <button
@@ -449,10 +453,10 @@ export function RantCard({ rant, currentUserId }: RantCardProps) {
 
         <button
           onClick={handleHide}
-          className={`transition-colors p-1 rounded-lg ${hidden ? "text-stone-400 hover:text-stone-600 hover:bg-stone-50" : "text-stone-400 hover:text-red-500 hover:bg-red-50"}`}
-          title={hidden ? "Unhide post" : "Hide post"}
+          className="text-stone-400 hover:text-red-500 hover:bg-red-50 transition-colors p-1 rounded-lg"
+          title="Hide post"
         >
-          {hidden ? <EyeIcon /> : <EyeOffIcon />}
+          <EyeOffIcon />
         </button>
       </div>
 
