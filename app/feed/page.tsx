@@ -8,7 +8,16 @@ import { RantCard } from "@/components/RantCard";
 import { ComposerModal } from "@/components/ComposerModal";
 import { Post } from "@/components/ComposerModal";
 import { useFeedStream } from "@/lib/useFeedStream";
-import { PenLine, X, Home, Clock, Menu, ArrowUp, WifiOff } from "lucide-react";
+import {
+  PenLine,
+  X,
+  Home,
+  Clock,
+  Menu,
+  ArrowUp,
+  WifiOff,
+  LogOut,
+} from "lucide-react";
 
 const MOTIVATIONAL_BOT_ID = "69ece87cf045acdc65d4b574";
 
@@ -148,6 +157,17 @@ export default function FeedPage() {
     setRants((prev) => [post, ...prev]);
   }
 
+  function handleLogout() {
+    localStorage.removeItem("ss_alias");
+    localStorage.removeItem("ss_user_id");
+    localStorage.removeItem("ss_initials");
+    localStorage.removeItem("ss_avatarColor");
+    localStorage.removeItem("ss_isAnonymous");
+    localStorage.removeItem("ss_displayName");
+    localStorage.removeItem("ss_nickname");
+    router.replace("/login");
+  }
+
   // ── Loading guard ─────────────────────────────────────────────────────────
   if (!ready) {
     return (
@@ -218,6 +238,16 @@ export default function FeedPage() {
             <Clock size={16} />
             Chat
           </button>
+          <button
+            onClick={() => {
+              setIsSidebarOpen(false);
+              handleLogout();
+            }}
+            className="flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors w-full text-left text-red-400 hover:bg-red-50 hover:text-red-500 mt-2"
+          >
+            <LogOut size={16} />
+            Logout
+          </button>
         </nav>
       </aside>
 
@@ -249,8 +279,16 @@ export default function FeedPage() {
         </div>
 
         {/* Desktop connection status */}
-        <div className="hidden md:flex items-center justify-end mb-2">
+        <div className="hidden md:flex items-center justify-end gap-3 mb-2">
           <ConnectionPill status={streamStatus} />
+          <button
+            onClick={handleLogout}
+            className="flex items-center gap-1.5 text-[11px] font-medium text-stone-400 hover:text-red-500 transition-colors"
+            title="Logout"
+          >
+            <LogOut size={12} />
+            Logout
+          </button>
         </div>
 
         {/* Scroll anchor */}
