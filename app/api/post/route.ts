@@ -30,7 +30,7 @@ export async function POST(req: NextRequest) {
     const { content, user_id } = body;
 
     const response = await fetch(
-      `${process.env.API_URL}/posts?user_id=${user_id}`,
+      `${process.env.API_URL}/posts/?user_id=${user_id}`,
       {
         method: "POST",
         headers: { "Content-Type": "application/json" },

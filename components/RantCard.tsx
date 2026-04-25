@@ -1,13 +1,15 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { Post } from "@/components/ComposerModal";
 
 interface Comment {
-  id: string;
-  alias: string;
-  initials: string;
-  text: string;
+  _id: string;
+  post_id: string;
+  user_id: string;
+  content: string;
+  likes: string[];
+  created_at: string;
 }
 
 interface RantCardProps {
@@ -61,6 +63,24 @@ function EditIcon() {
   );
 }
 
+function TrashIcon() {
+  return (
+    <svg
+      width="14"
+      height="14"
+      viewBox="0 0 24 24"
+      strokeWidth="2"
+      stroke="currentColor"
+      fill="none"
+    >
+      <polyline points="3 6 5 6 21 6" />
+      <path d="M19 6l-1 14H6L5 6" />
+      <path d="M10 11v6M14 11v6" />
+      <path d="M9 6V4h6v2" />
+    </svg>
+  );
+}
+
 function EyeOffIcon() {
   return (
     <svg
@@ -95,7 +115,6 @@ function EyeIcon() {
 
 function formatTimestamp(iso: string) {
   if (!iso) return "Unknown date";
-  // Trim microseconds — JS only supports milliseconds
   const cleaned = iso.replace(/(\.\d{3})\d+/, "$1");
   return new Date(cleaned).toLocaleString("en-PH", {
     month: "short",
@@ -112,6 +131,8 @@ export function RantCard({ rant, currentUserId }: RantCardProps) {
   const [feltCount, setFeltCount] = useState(rant.likes?.length ?? 0);
   const [showComments, setShowComments] = useState(false);
   const [comments, setComments] = useState<Comment[]>([]);
+  const [loadingComments, setLoadingComments] = useState(false);
+  const [commentCount, setCommentCount] = useState(rant.comment_count);
   const [commentInput, setCommentInput] = useState("");
   const [editing, setEditing] = useState(false);
   const [editText, setEditText] = useState(rant.content);
@@ -119,21 +140,63 @@ export function RantCard({ rant, currentUserId }: RantCardProps) {
   const [hidden, setHidden] = useState(
     (rant.hidden_by ?? []).includes(currentUserId),
   );
+  const [deleted, setDeleted] = useState(false);
 
   const isOwner = rant.user_id === currentUserId;
 
-  function handleLike() {
+  async function fetchComments() {
+    setLoadingComments(true);
+    try {
+      const res = await fetch(`/api/post/${rant._id}/comments`);
+      const data = await res.json();
+      if (data.success) setComments(data.data);
+    } catch {
+      console.error("Failed to fetch comments");
+    } finally {
+      setLoadingComments(false);
+    }
+  }
+
+  async function handleToggleComments() {
+    const next = !showComments;
+    setShowComments(next);
+    if (next && comments.length === 0) {
+      await fetchComments();
+    }
+  }
+
+  async function handleLike() {
     const newLiked = !liked;
     setLiked(newLiked);
     setFeltCount(newLiked ? feltCount + 1 : feltCount - 1);
-    // TODO: call API toggle like
+    try {
+      await fetch(`/api/post/${rant._id}/like?user_id=${currentUserId}`, {
+        method: "POST",
+      });
+    } catch {
+      // revert on error
+      setLiked(!newLiked);
+      setFeltCount(newLiked ? feltCount : feltCount + 1);
+    }
   }
 
-  function handleSaveEdit() {
+  async function handleSaveEdit() {
     if (!editText.trim()) return;
-    setBodyText(editText.trim());
-    setEditing(false);
-    // TODO: call API update post
+    try {
+      const res = await fetch(`/api/post/${rant._id}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          content: editText.trim(),
+          user_id: currentUserId,
+        }),
+      });
+      if (!res.ok) return;
+      setBodyText(editText.trim());
+      setEditing(false);
+    } catch {
+      console.error("Failed to update post");
+    }
   }
 
   function handleCancelEdit() {
@@ -141,36 +204,77 @@ export function RantCard({ rant, currentUserId }: RantCardProps) {
     setEditing(false);
   }
 
-  function handleSubmitComment() {
+  async function handleDelete() {
+    if (!confirm("Delete this post?")) return;
+    try {
+      const res = await fetch(
+        `/api/post/${rant._id}?user_id=${currentUserId}`,
+        {
+          method: "DELETE",
+        },
+      );
+      if (!res.ok) return;
+      setDeleted(true);
+    } catch {
+      console.error("Failed to delete post");
+    }
+  }
+
+  async function handleHide() {
+    const next = !hidden;
+    setHidden(next);
+    try {
+      await fetch(`/api/post/${rant._id}/hide?user_id=${currentUserId}`, {
+        method: "POST",
+      });
+    } catch {
+      setHidden(!next);
+    }
+  }
+
+  async function handleSubmitComment() {
     if (!commentInput.trim()) return;
-    setComments((prev) => [
-      ...prev,
-      {
-        id: Date.now().toString(),
-        alias: "you",
-        initials: currentUserId.slice(0, 2).toUpperCase(),
-        text: commentInput.trim(),
-      },
-    ]);
-    setCommentInput("");
-    // TODO: call API create comment
+    try {
+      const res = await fetch(`/api/post/${rant._id}/comments`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          content: commentInput.trim(),
+          user_id: currentUserId,
+        }),
+      });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        setComments((prev) => [...prev, data.data]);
+        setCommentCount((c) => c + 1);
+        setCommentInput("");
+      }
+    } catch {
+      console.error("Failed to submit comment");
+    }
   }
 
-  function handleDeleteComment(id: string) {
-    setComments((prev) => prev.filter((c) => c.id !== id));
-    // TODO: call API delete comment
+  async function handleDeleteComment(comment_id: string) {
+    try {
+      const res = await fetch(
+        `/api/comments/${comment_id}?user_id=${currentUserId}`,
+        {
+          method: "DELETE",
+        },
+      );
+      if (!res.ok) return;
+      setComments((prev) => prev.filter((c) => c._id !== comment_id));
+      setCommentCount((c) => c - 1);
+    } catch {
+      console.error("Failed to delete comment");
+    }
   }
 
-  function handleHide() {
-    setHidden((h) => !h);
-    // TODO: call API toggle hide
-  }
+  if (deleted) return null;
 
   return (
     <div
-      className={`bg-white rounded-xl border border-stone-200 p-4 transition-opacity ${
-        hidden ? "opacity-40" : "opacity-100"
-      }`}
+      className={`bg-white rounded-xl border border-stone-200 p-4 transition-opacity ${hidden ? "opacity-40" : "opacity-100"}`}
     >
       {/* Header */}
       <div className="flex items-start gap-3 mb-3">
@@ -231,49 +335,49 @@ export function RantCard({ rant, currentUserId }: RantCardProps) {
       <div className="flex items-center gap-3 pt-3 border-t border-stone-100">
         <button
           onClick={handleLike}
-          className={`flex items-center gap-1.5 text-sm transition-colors ${
-            liked ? "text-orange-500" : "text-stone-400 hover:text-stone-600"
-          }`}
+          className={`flex items-center gap-1.5 text-sm transition-colors ${liked ? "text-orange-500" : "text-stone-400 hover:text-stone-600"}`}
         >
           <HeartIcon filled={liked} />
           <span>{feltCount} felt this</span>
         </button>
 
         <button
-          onClick={() => setShowComments((s) => !s)}
+          onClick={handleToggleComments}
           className="flex items-center gap-1.5 text-sm text-stone-400 hover:text-stone-600 transition-colors"
         >
           <ChatIcon />
           <span>
-            {rant.comment_count}{" "}
-            {rant.comment_count === 1 ? "reply" : "replies"}
+            {commentCount} {commentCount === 1 ? "reply" : "replies"}
           </span>
         </button>
 
         <div className="flex-1" />
 
-        {/* Edit — only owner */}
         {isOwner && !editing && (
-          <button
-            onClick={() => {
-              setEditText(bodyText);
-              setEditing(true);
-            }}
-            className="text-stone-400 hover:text-stone-600 transition-colors p-1 rounded-lg hover:bg-stone-50"
-            title="Edit post"
-          >
-            <EditIcon />
-          </button>
+          <>
+            <button
+              onClick={() => {
+                setEditText(bodyText);
+                setEditing(true);
+              }}
+              className="text-stone-400 hover:text-stone-600 transition-colors p-1 rounded-lg hover:bg-stone-50"
+              title="Edit post"
+            >
+              <EditIcon />
+            </button>
+            <button
+              onClick={handleDelete}
+              className="text-stone-400 hover:text-red-500 transition-colors p-1 rounded-lg hover:bg-red-50"
+              title="Delete post"
+            >
+              <TrashIcon />
+            </button>
+          </>
         )}
 
-        {/* Hide/Unhide */}
         <button
           onClick={handleHide}
-          className={`transition-colors p-1 rounded-lg ${
-            hidden
-              ? "text-stone-400 hover:text-stone-600 hover:bg-stone-50"
-              : "text-stone-400 hover:text-red-500 hover:bg-red-50"
-          }`}
+          className={`transition-colors p-1 rounded-lg ${hidden ? "text-stone-400 hover:text-stone-600 hover:bg-stone-50" : "text-stone-400 hover:text-red-500 hover:bg-red-50"}`}
           title={hidden ? "Unhide post" : "Hide post"}
         >
           {hidden ? <EyeIcon /> : <EyeOffIcon />}
@@ -283,34 +387,42 @@ export function RantCard({ rant, currentUserId }: RantCardProps) {
       {/* Comments Section */}
       {showComments && (
         <div className="mt-3 pt-3 border-t border-stone-100 flex flex-col gap-3">
-          {comments.length === 0 && (
+          {loadingComments ? (
+            <div className="flex justify-center py-2">
+              <div className="w-4 h-4 rounded-full border-2 border-sage-300 border-t-sage-600 animate-spin" />
+            </div>
+          ) : comments.length === 0 ? (
             <p className="text-xs text-stone-400 text-center">
               No replies yet. Be the first!
             </p>
+          ) : (
+            comments.map((c) => (
+              <div key={c._id} className="flex items-start gap-2">
+                <div className="w-7 h-7 rounded-full bg-purple-100 flex items-center justify-center text-[10px] font-medium text-purple-800 shrink-0">
+                  {c.user_id?.slice(0, 2).toUpperCase() ?? "??"}
+                </div>
+                <div className="flex-1 bg-stone-50 rounded-lg px-3 py-2">
+                  <div className="text-xs font-medium text-stone-700">
+                    {c.user_id === currentUserId
+                      ? "You"
+                      : `user_${c.user_id?.slice(-4)}`}
+                  </div>
+                  <div className="text-sm text-stone-500 mt-0.5 leading-snug">
+                    {c.content}
+                  </div>
+                </div>
+                {c.user_id === currentUserId && (
+                  <button
+                    onClick={() => handleDeleteComment(c._id)}
+                    className="text-stone-300 hover:text-red-400 transition-colors text-xs mt-1 px-1"
+                    title="Delete comment"
+                  >
+                    ✕
+                  </button>
+                )}
+              </div>
+            ))
           )}
-
-          {comments.map((c) => (
-            <div key={c.id} className="flex items-start gap-2">
-              <div className="w-7 h-7 rounded-full bg-purple-100 flex items-center justify-center text-[10px] font-medium text-purple-800 shrink-0">
-                {c.initials}
-              </div>
-              <div className="flex-1 bg-stone-50 rounded-lg px-3 py-2">
-                <div className="text-xs font-medium text-stone-700">
-                  {c.alias}
-                </div>
-                <div className="text-sm text-stone-500 mt-0.5 leading-snug">
-                  {c.text}
-                </div>
-              </div>
-              <button
-                onClick={() => handleDeleteComment(c.id)}
-                className="text-stone-300 hover:text-red-400 transition-colors text-xs mt-1 px-1"
-                title="Delete comment"
-              >
-                ✕
-              </button>
-            </div>
-          ))}
 
           {/* Comment Input */}
           <div className="flex items-center gap-2 mt-1">
