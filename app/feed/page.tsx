@@ -72,6 +72,49 @@ export default function FeedPage() {
     setRants((prev) => [post, ...prev]);
   }
 
+  const MOTIVATIONAL_BOT_ID = "69ece87cf045acdc65d4b574";
+  const rantsRef = React.useRef<Post[]>([]);
+
+  useEffect(() => {
+    rantsRef.current = rants;
+  }, [rants]);
+
+  useEffect(() => {
+    async function postMotivationalQuote() {
+      try {
+        const quoteRes = await fetch(
+          "https://hackathon-backend-production-c1f0.up.railway.app/motivational/",
+        );
+        const quoteData = await quoteRes.json();
+        const quote: string = quoteData?.data?.quote;
+        if (!quote) return;
+
+        const postRes = await fetch("/api/post", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            content: quote,
+            user_id: MOTIVATIONAL_BOT_ID,
+          }),
+        });
+        const data = await postRes.json();
+        if (postRes.ok && data.data) {
+          setRants((prev) => [data.data, ...prev]);
+        }
+      } catch {
+        console.error("Failed to post motivational quote");
+      }
+    }
+
+    const timeout = setTimeout(() => {
+      postMotivationalQuote();
+      const interval = setInterval(postMotivationalQuote, 2 * 60 * 60 * 1000);
+      return () => clearInterval(interval);
+    }, 0);
+
+    return () => clearTimeout(timeout);
+  }, []);
+
   if (!ready) {
     return (
       <div className="min-h-screen bg-stone-50 flex items-center justify-center">
