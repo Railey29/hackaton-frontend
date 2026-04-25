@@ -1,4 +1,4 @@
-import React from 'react';
+/** import React from 'react';
 
 const TABS = ['Latest', 'Trending', 'Supported'];
 
@@ -23,3 +23,4 @@ export function SortTabs() {
     </div>
   );
 }
+**/

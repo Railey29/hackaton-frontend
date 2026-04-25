@@ -1,54 +1,43 @@
-import React from 'react';
-import { Home, Clock, Star, UserCircle2 } from 'lucide-react';
+"use client";
 
-type LeftSidebarProps = {
-  onShareRant: () => void;
-};
+import React from 'react';
+import { Home, Clock } from 'lucide-react';
+import Link from 'next/link';
+import { usePathname } from 'next/navigation';
 
 const NAV_ITEMS = [
-  { name: 'Feed', icon: Home, active: true },
-  { name: 'Recent', icon: Clock, active: false },
-  { name: 'Most Helpful', icon: Star, active: false },
-  { name: 'My Rants', icon: UserCircle2, active: false },
+  { name: 'Feed', icon: Home, href: '/feed' },
+  { name: 'Chat', icon: Clock, href: '/chat' },
 ];
 
-export function LeftSidebar({ onShareRant }: LeftSidebarProps) {
+export function LeftSidebar() {
+  const pathname = usePathname();
+
   return (
-    <aside className="w-[220px] hidden md:flex flex-col fixed h-screen overflow-y-auto pt-8 pb-8 pr-6">
-      
+    <aside className="w-[220px] hidden md:flex flex-col sticky top-0 h-screen overflow-y-auto pt-8 pb-8 pr-6">
+
       {/* Brand */}
       <div className="mb-10">
-        <div className="flex items-center gap-2 mb-1">
-          <div className="text-[10px] font-bold text-stone-400 uppercase tracking-widest">Antigravity AI</div>
-          <div className="w-1.5 h-1.5 rounded-full bg-sage-400" />
-        </div>
         <h1 className="font-lora text-2xl text-sage-800 font-semibold tracking-tight">SafeSpace</h1>
       </div>
 
       {/* Nav */}
-      <nav className="flex flex-col gap-2 mb-10">
+      <nav className="flex flex-col gap-2">
         {NAV_ITEMS.map((item) => (
-          <button
+          <Link
             key={item.name}
+            href={item.href}
             className={`flex items-center gap-3 px-3 py-2.5 rounded-xl transition-colors font-medium text-sm ${
-              item.active 
-                ? 'bg-sage-100 text-sage-700' 
+              pathname === item.href
+                ? 'bg-sage-100 text-sage-700'
                 : 'text-stone-500 hover:bg-stone-100 hover:text-stone-700'
             }`}
           >
             <item.icon size={18} />
             {item.name}
-          </button>
+          </Link>
         ))}
       </nav>
-
-      {/* Button */}
-      <button 
-        onClick={onShareRant}
-        className="w-full bg-sage-500 hover:bg-sage-600 text-white font-medium py-3 px-4 rounded-xl transition-colors shadow-none text-sm"
-      >
-        + Share a rant
-      </button>
 
     </aside>
   );

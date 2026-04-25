@@ -8,13 +8,13 @@ const TAGS: FlairType[] = [
 
 export function RightSidebar() {
   return (
-    <aside className="w-[200px] hidden lg:block flex-col pt-8 pb-8">
+    <aside className="w-[200px] hidden lg:flex sticky top-0 h-screen overflow-y-auto flex-col pt-8 pb-8">
       
       {/* Stat Widget */}
       <div className="bg-white border border-stone-200 rounded-xl p-5 mb-6">
         <h3 className="font-lora text-[15px] font-semibold text-sage-800 mb-2">You're not alone</h3>
         <p className="text-[13px] text-stone-500 leading-relaxed">
-          <strong className="text-stone-700">1,284</strong> people shared a rant this week.
+          <strong className="text-stone-700"></strong> people shared a rant this week.
         </p>
       </div>
 

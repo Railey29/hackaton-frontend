@@ -40,4 +40,14 @@
   *:focus-visible {
     @apply outline-none ring-2 ring-sage-400 ring-offset-2 ring-offset-stone-50;
   }
+  /* Custom scrollbars */
+  ::-webkit-scrollbar {
+    width: 3px;
+    height: 3px;
+  }
+  ::-webkit-scrollbar-thumb {
+    background-color: var(--color-sage-200);
+    border-radius: 4px;
+  }
 }
+
