@@ -1,55 +1,332 @@
 "use client";
 
 import React, { useState, useRef, useEffect } from "react";
-import { ChatSidebar } from "@/components/ChatSidebar";
-import { MessageBubble } from "@/components/MessageBubble";
-import { QuickReplies } from "@/components/QuickReplies";
-import { RightPanel } from "@/components/RightPanel";
-import { TypingIndicator } from "@/components/TypingIndicator";
-import { Message, INITIAL_MESSAGES, DEFAULT_QUICK_REPLIES } from "@/lib/chatData";
+import {
+  Message,
+  DEFAULT_QUICK_REPLIES,
+  AFTER_RESPONSE_QUICK_REPLIES,
+} from "@/lib/chatData";
+import { ChatSidebar } from "@/components/chat/ChatSidebar";
+import { RightPanel } from "@/components/chat/RightPanel";
+import { MessageBubble } from "@/components/chat/MessageBubble";
+import { TypingIndicator } from "@/components/chat/TypingIndicator";
+import { QuickReplies } from "@/components/chat/QuickReplies";
+import {
+  Trash2,
+  Share,
+  MoreHorizontal,
+  ArrowUp,
+  Menu,
+  Info,
+  X,
+} from "lucide-react";
+import { getOrCreateAnonId } from "@/lib/anon";
 
+// ─── Stress Assessment Types ───────────────────────────────────────────────
+interface StressInputData {
+  fin: number;
+  prices: number;
+  health: number;
+  school: number;
+  family: number;
+}
+
+// The order in which we collect each field
+const STRESS_FIELD_ORDER: (keyof StressInputData)[] = [
+  "fin",
+  "prices",
+  "health",
+  "school",
+  "family",
+];
+
+// Human-readable labels shown in the progress bar
+const STRESS_FIELD_LABELS: Record<keyof StressInputData, string> = {
+  fin: "Finances",
+  prices: "Prices",
+  health: "Health",
+  school: "School/Work",
+  family: "Family",
+};
+
+type StressStatus = "idle" | "in_progress" | "done" | "limited";
+
+const STRESS_TRIGGER_KEYWORDS = [
+  "stress",
+  "stressed",
+  "stressful",
+  "anxious",
+  "anxiety",
+  "overwhelmed",
+  "burnout",
+  "pressure",
+  "assess",
+  "check my stress",
+  "stress check",
+  "stress test",
+  "how stressed",
+  "finances",
+  "money",
+  "bills",
+  "prices",
+  "health",
+  "school",
+  "work",
+  "family",
+];
+
+const INITIAL_MESSAGES: Message[] = [
+  {
+    id: "1",
+    sender: "bot",
+    text: "Hey there! I'm AlphaBot, your stress companion. You can talk to me, or say **'check my stress'** to start a quick stress check.",
+  },
+];
+
+// ─── Helpers ───────────────────────────────────────────────────────────────────
+const isStressTrigger = (text: string) =>
+  STRESS_TRIGGER_KEYWORDS.some((kw) => text.toLowerCase().includes(kw));
+
+/** Count how many fields have been answered */
+const filledCount = (data: StressInputData) =>
+  STRESS_FIELD_ORDER.filter((f) => data[f] !== undefined && data[f] !== 0)
+    .length;
+
+/** Check if all fields are filled */
+const isAssessmentComplete = (data: StressInputData) =>
+  STRESS_FIELD_ORDER.every((f) => data[f] !== undefined && data[f] !== 0);
+
+// ─── Main Page ────────────────────────────────────────────────────────────────
 export default function ChatPage() {
   const [messages, setMessages] = useState<Message[]>(INITIAL_MESSAGES);
-  const [selectedReply, setSelectedReply] = useState<string | undefined>();
+  const [inputText, setInputText] = useState("");
   const [isTyping, setIsTyping] = useState(false);
-  const [sidebarOpen, setSidebarOpen] = useState(true);
-  const bottomRef = useRef<HTMLDivElement>(null);
+  const [assessmentAnalysis, setAssessmentAnalysis] = useState<string | null>(
+    null,
+  );
+  const [assessmentAnalysisLoading, setAssessmentAnalysisLoading] =
+    useState(false);
+  const [quickReplies, setQuickReplies] = useState<string[]>(
+    DEFAULT_QUICK_REPLIES,
+  );
+  const [selectedQuickReply, setSelectedQuickReply] = useState<
+    string | undefined
+  >();
+  const [isSidebarOpen, setIsSidebarOpen] = useState(false);
+  const [isRightPanelOpen, setIsRightPanelOpen] = useState(false);
+
+  // ── Stress assessment state ──
+  const [stressStatus, setStressStatus] = useState<StressStatus>("idle");
+  const [stressData, setStressData] = useState<StressInputData>({
+    fin: 0,
+    prices: 0,
+    health: 0,
+    school: 0,
+    family: 0,
+  });
+  const [isAssessmentMode, setIsAssessmentMode] = useState(false);
+
+  const messagesEndRef = useRef<HTMLDivElement>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, isTyping]);
 
-  const handleSend = async (userMessage: string) => {
-    if (!userMessage.trim() || isTyping) return;
+  useEffect(() => {
+    if (textareaRef.current) {
+      textareaRef.current.style.height = "18px";
+      const scrollHeight = textareaRef.current.scrollHeight;
+      textareaRef.current.style.height = `${Math.min(scrollHeight, 80)}px`;
+    }
+  }, [inputText]);
 
-    // 1. Show user message immediately
-    const userMsg: Message = {
-      id: Date.now().toString(),
-      sender: "user",
-      text: userMessage.trim(),
-    };
-    setMessages((prev) => [...prev, userMsg]);
-    setIsTyping(true);
-    setSelectedReply(undefined);
+  const handleOverlayClick = () => {
+    setIsSidebarOpen(false);
+    setIsRightPanelOpen(false);
+  };
 
+  const addBotMessage = (text: string) => {
+    setMessages((prev) => [
+      ...prev,
+      { id: Date.now().toString(), sender: "bot", text },
+    ]);
+  };
+
+  /**
+   * Start assessment mode - shows static questions in RightPanel
+   */
+  const startAssessment = () => {
+    setIsAssessmentMode(true);
+    setStressStatus("in_progress");
+    setAssessmentAnalysis(null);
+    setAssessmentAnalysisLoading(false);
+    setStressData({
+      fin: 0,
+      prices: 0,
+      health: 0,
+      school: 0,
+      family: 0,
+    });
+    addBotMessage(
+      "Let's do a quick stress check.\n\nPlease answer the questions on the right panel. I'll analyze your responses and share the results here in the chat.",
+    );
+  };
+
+  /**
+   * Called when user completes the static form in RightPanel
+   */
+  const handleAssessmentSubmit = async (data: StressInputData) => {
+    console.log("[Assessment] Submitting data:", data);
+    setStressData(data);
+    setStressStatus("in_progress");
+    setIsAssessmentMode(false);
     try {
-      // 2. Call Gemini API
+      await analyzeWithGemini(data);
+    } catch (err) {
+      addBotMessage(
+        "Sorry, something went wrong generating your analysis. Please try again later.",
+      );
+      console.error("[Assessment] Analysis error:", err);
+    }
+  };
+
+  /**
+   * Calls /api/gemini with { action: "analyze", stressData }
+   * Gemini computes the weighted score and returns an insight
+   */
+  const analyzeWithGemini = async (finalData: StressInputData) => {
+    setIsTyping(true);
+    setAssessmentAnalysisLoading(true);
+    setAssessmentAnalysis(null);
+    try {
+      console.log("[Assessment] Sending to API:", finalData);
       const res = await fetch("/api/gemini", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ message: userMessage.trim() }),
+        body: JSON.stringify({ action: "analyze", stressData: finalData }),
       });
-
       const data = await res.json();
+      console.log("[Assessment] API response:", data);
+      const rawReply =
+        typeof data?.reply === "string" ? data.reply.trim() : "";
+      const replyText =
+        rawReply.length > 0
+          ? rawReply
+          : "Thanks for sharing. Based on your answers, it looks like you're carrying quite a bit. Take it one step at a time.";
+      setAssessmentAnalysis(replyText);
+      addBotMessage(replyText);
 
-      // 3. Show bot reply
+      // Save assessment + analysis to MongoDB (best-effort; UI shouldn't block on it)
+      try {
+        const anonId = getOrCreateAnonId();
+        await fetch("/api/assessments", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            stressData: finalData,
+            analysisText: replyText,
+            stressScore: data?.stressScore,
+            stressLevel: data?.stressLevel,
+            anonId,
+          }),
+        });
+      } catch (e) {
+        console.warn("[Assessment] Failed to save assessment:", e);
+      }
+
+      setTimeout(() => setQuickReplies(AFTER_RESPONSE_QUICK_REPLIES), 300);
+    } catch (err) {
+      const errorText =
+        "Oops, something went wrong generating your analysis. Try again?";
+      setAssessmentAnalysis(errorText);
+      addBotMessage(errorText);
+      console.error("[Assessment] API error:", err);
+    } finally {
+      setIsTyping(false);
+      setAssessmentAnalysisLoading(false);
+      setStressStatus("limited");
+      setIsAssessmentMode(false);
+    }
+  };
+
+  const handleSend = async (overrideText?: string) => {
+    const textToSend = overrideText || inputText.trim();
+    if (!textToSend || isTyping) return;
+
+    const userMsg: Message = {
+      id: Date.now().toString(),
+      sender: "user",
+      text: textToSend,
+    };
+    setMessages((prev) => [...prev, userMsg]);
+    setInputText("");
+    setQuickReplies([]);
+    setSelectedQuickReply(undefined);
+    if (textareaRef.current) textareaRef.current.style.height = "18px";
+
+    // ── LIMITED MODE: After assessment, only allow stress-related queries ──
+    if (stressStatus === "limited") {
+      if (!isStressTrigger(textToSend)) {
+        setTimeout(() => {
+          addBotMessage(
+            "After an assessment, I can only help with stress-related topics. Would you like to talk about how you're feeling, or start a new assessment?",
+          );
+        }, 400);
+        return;
+      }
+
+      // Allow stress-related follow-up questions
+      setIsTyping(true);
+      try {
+        const res = await fetch("/api/gemini", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            action: "chat",
+            message: textToSend,
+            context: "stress_follow_up",
+            previousData: stressData,
+          }),
+        });
+        const data = await res.json();
+        addBotMessage(data.reply ?? "I'm here. Tell me more.");
+      } catch {
+        addBotMessage("Something went wrong. I'm still here — try again?");
+      } finally {
+        setIsTyping(false);
+      }
+      return;
+    }
+
+    // ── TRIGGER: user mentions stress-related keyword ──
+    if (stressStatus === "idle" && isStressTrigger(textToSend)) {
+      setStressStatus("in_progress");
+      setIsAssessmentMode(true);
+
+      setTimeout(() => {
+        addBotMessage(
+          "Got it! Let's do a quick stress check.\n\nPlease answer the questions on the right panel. I'll analyze your responses and share the results here in the chat.",
+        );
+      }, 400);
+      return;
+    }
+
+    // ── NORMAL CHAT via Gemini ──
+    setIsTyping(true);
+    try {
+      const res = await fetch("/api/gemini", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "chat", message: textToSend }),
+      });
+      const data = await res.json();
       const botMsg: Message = {
         id: (Date.now() + 1).toString(),
         sender: "bot",
         text: data.reply ?? "I'm here. Tell me more.",
       };
       setMessages((prev) => [...prev, botMsg]);
-
     } catch (err) {
       console.error("Gemini error:", err);
       setMessages((prev) => [
@@ -57,111 +334,302 @@ export default function ChatPage() {
         {
           id: (Date.now() + 1).toString(),
           sender: "bot",
-          text: "Sorry, something went wrong. Please try again.",
+          text: "Something went wrong. I'm still here — try again?",
         },
       ]);
     } finally {
       setIsTyping(false);
+      setTimeout(() => setQuickReplies(AFTER_RESPONSE_QUICK_REPLIES), 300);
     }
   };
 
-  const handleNewConversation = () => {
-    setMessages(INITIAL_MESSAGES);
-    setSelectedReply(undefined);
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (e.key === "Enter" && !e.shiftKey) {
+      e.preventDefault();
+      handleSend();
+    }
   };
 
+  const handleQuickReplySelect = (reply: string) => {
+    setSelectedQuickReply(reply);
+    handleSend(reply);
+  };
+
+  const handleNewConversation = () => {
+    setMessages([
+      {
+        id: Date.now().toString(),
+        sender: "bot",
+        text: "Hey, I'm glad you're back. What's on your mind today? You can also say **'check my stress'** or click the assessment button to start a stress check.",
+      },
+    ]);
+    setQuickReplies(DEFAULT_QUICK_REPLIES);
+    setSelectedQuickReply(undefined);
+    setInputText("");
+    setIsTyping(false);
+    setAssessmentAnalysis(null);
+    setAssessmentAnalysisLoading(false);
+    setStressStatus("idle");
+    setStressData({
+      fin: 0,
+      prices: 0,
+      health: 0,
+      school: 0,
+      family: 0,
+    });
+    setIsAssessmentMode(false);
+    setIsSidebarOpen(false);
+  };
+
+  const anyPanelOpen = isSidebarOpen || isRightPanelOpen;
+
+  const inputPlaceholder =
+    stressStatus === "in_progress"
+      ? "Type a number from 0 to 10..."
+      : "Say anything — this is your space...";
+
+  const stepsCompleted = filledCount(stressData);
+
   return (
-    <div className="flex h-screen bg-sage-50 overflow-hidden">
-      {/* Sidebar */}
-      {sidebarOpen && (
-        <ChatSidebar
-          onNewConversation={handleNewConversation}
-          onClose={() => setSidebarOpen(false)}
+    <div className="h-screen w-full bg-stone-50 overflow-hidden flex justify-center items-center">
+      {anyPanelOpen && (
+        <div
+          className="fixed inset-0 z-20 bg-black/30 lg:hidden"
+          onClick={handleOverlayClick}
+          aria-hidden="true"
         />
       )}
 
-      {/* Main Chat */}
-      <div className="flex flex-col flex-1 min-w-0">
-        {/* Messages list */}
-        <div className="flex-1 overflow-y-auto px-[18px] py-4 flex flex-col gap-3">
-          {messages.map((msg) => (
-            <MessageBubble key={msg.id} message={msg} />
-          ))}
-          {isTyping && <TypingIndicator />}
-          <div ref={bottomRef} />
-        </div>
+      <div className="w-full h-full flex max-w-[1400px] border-x border-sage-200 bg-stone-50 relative overflow-hidden">
+        {/* Column 1: Sidebar */}
+        <aside
+          className={[
+            "h-full z-30 transition-transform duration-300 ease-in-out",
+            "lg:static lg:translate-x-0 lg:w-[210px] lg:shrink-0",
+            "max-lg:fixed max-lg:top-0 max-lg:left-0 max-lg:w-[260px]",
+            isSidebarOpen ? "max-lg:translate-x-0" : "max-lg:-translate-x-full",
+          ].join(" ")}
+        >
+          <ChatSidebar
+            onNewConversation={handleNewConversation}
+            onClose={() => setIsSidebarOpen(false)}
+          />
+        </aside>
 
-        {/* Quick Replies */}
-        <QuickReplies
-          replies={DEFAULT_QUICK_REPLIES}
-          onSelect={(reply) => {
-            setSelectedReply(reply);
-            handleSend(reply);
-          }}
-          selectedReply={selectedReply}
-        />
+        {/* Column 2: Main chat */}
+        <main className="flex flex-col flex-1 min-w-0 h-full bg-stone-50 overflow-hidden">
+          {/* Header */}
+          <div className="h-[58px] bg-white border-b border-sage-100 flex items-center justify-between px-[14px] sm:px-[18px] shrink-0">
+            <div className="flex items-center gap-[10px]">
+              <button
+                className="lg:hidden w-[30px] h-[30px] rounded-[7px] border border-sage-100 flex items-center justify-center text-stone-400 hover:text-stone-600 hover:bg-sage-50 transition-colors"
+                onClick={() => {
+                  setIsSidebarOpen(true);
+                  setIsRightPanelOpen(false);
+                }}
+                aria-label="Open sidebar"
+              >
+                <Menu size={14} strokeWidth={1.5} />
+              </button>
 
-        {/* Text Input */}
-        <div className="px-[18px] pb-4 pt-1">
-          <ChatInput onSend={handleSend} disabled={isTyping} />
-        </div>
+              <div className="w-[34px] h-[34px] rounded-full bg-sage-100 flex items-center justify-center border border-sage-200 shrink-0">
+                <svg
+                  width="20"
+                  height="20"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  className="text-sage-500"
+                  strokeWidth="1.4"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                >
+                  <circle cx="12" cy="12" r="10" />
+                  <path d="M8 9h.01" />
+                  <path d="M16 9h.01" />
+                  <path d="M8 15a4 4 0 0 0 8 0" />
+                </svg>
+              </div>
+              <div className="flex flex-col">
+                <span className="font-lora text-[14px] text-sage-800 font-medium leading-none mb-1">
+                  AlphaBot
+                </span>
+                <div className="flex items-center gap-1.5">
+                  <div className="w-[5px] h-[5px] rounded-full bg-sage-500" />
+                  <span className="text-[11px] text-sage-500 leading-none">
+                    {stressStatus === "in_progress"
+                      ? "Assessment in progress..."
+                      : stressStatus === "limited"
+                        ? "Limited mode - stress only"
+                        : "Here for you"}
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-1">
+              <button
+                aria-label="Clear chat"
+                onClick={handleNewConversation}
+                className="w-[28px] h-[28px] rounded-[7px] border border-sage-100 flex items-center justify-center hover:bg-sage-50 transition-colors text-stone-400 hover:text-stone-600"
+              >
+                <Trash2 size={13} strokeWidth={1.4} />
+              </button>
+              <button
+                aria-label="Share chat"
+                className="hidden sm:flex w-[28px] h-[28px] rounded-[7px] border border-sage-100 items-center justify-center hover:bg-sage-50 transition-colors text-stone-400 hover:text-stone-600"
+              >
+                <Share size={13} strokeWidth={1.4} />
+              </button>
+              <button
+                aria-label="More options"
+                className="hidden sm:flex w-[28px] h-[28px] rounded-[7px] border border-sage-100 items-center justify-center hover:bg-sage-50 transition-colors text-stone-400 hover:text-stone-600"
+              >
+                <MoreHorizontal size={13} strokeWidth={1.4} />
+              </button>
+              <button
+                className="xl:hidden w-[28px] h-[28px] rounded-[7px] border border-sage-100 flex items-center justify-center hover:bg-sage-50 transition-colors text-stone-400 hover:text-stone-600"
+                onClick={() => {
+                  setIsRightPanelOpen(true);
+                  setIsSidebarOpen(false);
+                }}
+                aria-label="Open info panel"
+              >
+                <Info size={13} strokeWidth={1.4} />
+              </button>
+            </div>
+          </div>
+
+          {/* Stress Progress Bar — only shown during assessment */}
+          {stressStatus === "in_progress" && isAssessmentMode && (
+            <div className="px-[14px] sm:px-[18px] pt-[8px] pb-[5px] bg-white border-b border-sage-100">
+              <div className="flex items-center gap-2">
+                <span className="text-[10px] text-sage-500 uppercase tracking-wider font-medium shrink-0">
+                  Stress Check
+                </span>
+                <div className="flex-1 flex gap-1">
+                  {STRESS_FIELD_ORDER.map((field, i) => (
+                    <div
+                      key={field}
+                      title={STRESS_FIELD_LABELS[field]}
+                      className={`h-[3px] flex-1 rounded-full transition-all duration-300 ${
+                        i < stepsCompleted
+                          ? "bg-sage-500"
+                          : i === stepsCompleted
+                            ? "bg-sage-300"
+                            : "bg-sage-100"
+                      }`}
+                    />
+                  ))}
+                </div>
+                <span className="text-[10px] text-sage-400 shrink-0">
+                  {stepsCompleted}/5
+                </span>
+              </div>
+              <p className="text-[10px] text-sage-400 mt-[3px]">
+                Please answer the questions on the right panel
+              </p>
+            </div>
+          )}
+
+          {/* Messages Area */}
+          <div
+            className="flex-1 overflow-y-auto px-[14px] sm:px-[18px] py-[16px] flex flex-col gap-[12px]"
+            role="log"
+            aria-live="polite"
+          >
+            <div className="text-[10px] text-stone-400 text-center uppercase tracking-wider mb-2 font-medium">
+              Today · Apr 26
+            </div>
+
+            {messages.map((msg) => (
+              <MessageBubble key={msg.id} message={msg} />
+            ))}
+
+            {isTyping && <TypingIndicator />}
+
+            <div ref={messagesEndRef} />
+          </div>
+
+          {/* Quick Replies — hidden during stress assessment */}
+          {stressStatus === "idle" && (
+            <QuickReplies
+              replies={quickReplies}
+              onSelect={handleQuickReplySelect}
+              selectedReply={selectedQuickReply}
+            />
+          )}
+
+          {/* Input Area */}
+          <div className="px-[12px] sm:px-[14px] py-[10px] bg-white border-t border-sage-100 shrink-0 flex flex-col">
+            <div className="flex items-end gap-[8px] w-full">
+              <div className="flex-1 border border-sage-200 rounded-[10px] bg-stone-50 px-[11px] py-[7px] flex items-center gap-[7px] focus-within:border-sage-400 transition-colors">
+                <textarea
+                  ref={textareaRef}
+                  value={inputText}
+                  onChange={(e) => {
+                    setInputText(e.target.value);
+                    if (
+                      selectedQuickReply &&
+                      e.target.value !== selectedQuickReply
+                    ) {
+                      setSelectedQuickReply(undefined);
+                    }
+                  }}
+                  onKeyDown={handleKeyDown}
+                  placeholder={inputPlaceholder}
+                  aria-label="Type your message"
+                  className="w-full bg-transparent border-none outline-none resize-none font-dm-sans text-[13px] text-sage-800 placeholder:text-stone-400"
+                  style={{ minHeight: "18px", maxHeight: "80px" }}
+                />
+              </div>
+
+              <button
+                onClick={() => handleSend()}
+                disabled={!inputText.trim() || isTyping}
+                className="w-[34px] h-[34px] sm:w-[30px] sm:h-[30px] shrink-0 rounded-[7px] bg-sage-500 hover:bg-sage-600 disabled:opacity-35 disabled:hover:bg-sage-500 flex items-center justify-center transition-all"
+                aria-label="Send message"
+              >
+                <ArrowUp size={16} className="text-white" strokeWidth={2} />
+              </button>
+            </div>
+
+            <div className="mt-[6px] text-center text-[10px] text-stone-400 uppercase tracking-widest bg-stone-50 py-[3px] rounded">
+              AlphaBot is an AI companion · Not a crisis service · Always
+              anonymous
+            </div>
+          </div>
+        </main>
+
+        {/* Column 3: Right Panel */}
+        <aside
+          className={[
+            "h-full bg-stone-50 border-l border-sage-200 z-30 transition-transform duration-300 ease-in-out",
+            "xl:static xl:translate-x-0 xl:w-[220px] xl:shrink-0",
+            "max-xl:fixed max-xl:top-0 max-xl:right-0 max-xl:w-[260px]",
+            isRightPanelOpen
+              ? "max-xl:translate-x-0"
+              : "max-xl:translate-x-full",
+          ].join(" ")}
+        >
+          <div className="xl:hidden flex justify-start px-3 pt-3 pb-1">
+            <button
+              onClick={() => setIsRightPanelOpen(false)}
+              className="w-7 h-7 rounded-md flex items-center justify-center text-stone-400 hover:text-stone-600 hover:bg-sage-50"
+              aria-label="Close info panel"
+            >
+              <X size={14} />
+            </button>
+          </div>
+          <RightPanel
+            isAssessmentMode={isAssessmentMode}
+            onStartAssessment={startAssessment}
+            onSubmitAssessment={handleAssessmentSubmit}
+            analysisText={assessmentAnalysis}
+            analysisLoading={assessmentAnalysisLoading}
+          />
+        </aside>
       </div>
-
-      {/* Right Panel */}
-      <RightPanel />
     </div>
   );
 }
-
-// ── Chat Input ────────────────────────────────────────────────────────────────
-function ChatInput({
-  onSend,
-  disabled,
-}: {
-  onSend: (msg: string) => void;
-  disabled?: boolean;
-}) {
-  const [value, setValue] = useState("");
-
-  const handleSubmit = () => {
-    if (!value.trim() || disabled) return;
-    onSend(value.trim());
-    setValue("");
-  };
-
-  return (
-    <div className="flex gap-2 items-end border border-sage-200 rounded-[12px] bg-white px-3 py-2">
-      <textarea
-        rows={1}
-        value={value}
-        onChange={(e) => setValue(e.target.value)}
-        onKeyDown={(e) => {
-          if (e.key === "Enter" && !e.shiftKey) {
-            e.preventDefault();
-            handleSubmit();
-          }
-        }}
-        placeholder="Say anything — this is your space..."
-        disabled={disabled}
-        className="flex-1 resize-none bg-transparent font-dm-sans text-[13px] text-sage-800 placeholder:text-stone-300 outline-none leading-[1.5] disabled:opacity-50"
-      />
-      <button
-        onClick={handleSubmit}
-        disabled={disabled || !value.trim()}
-        className="text-sage-500 hover:text-sage-700 transition-colors disabled:opacity-30 pb-[1px]"
-      >
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
-          <path d="M2 21L23 12 2 3v7l15 2-15 2v7z" />
-        </svg>
-      </button>
-    </div>
-  );
-}
-const res = await fetch("/api/gemini", {
-  method: "POST",
-  headers: { "Content-Type": "application/json" },
-  body: JSON.stringify({ message: userMessage.trim() }),
-});
-
-const data = await res.json();
-console.log("FULL API RESPONSE:", JSON.stringify(data)); // 👈 add this
