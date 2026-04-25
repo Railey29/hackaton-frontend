@@ -1,13 +1,16 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useCallback, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { LeftSidebar } from "@/components/LeftSidebar";
 import { RightSidebar } from "@/components/RightSidebar";
 import { RantCard } from "@/components/RantCard";
 import { ComposerModal } from "@/components/ComposerModal";
 import { Post } from "@/components/ComposerModal";
-import { PenLine, X, Home, Clock, Menu } from "lucide-react";
+import { useFeedStream } from "@/lib/useFeedStream";
+import { PenLine, X, Home, Clock, Menu, ArrowUp, WifiOff } from "lucide-react";
+
+const MOTIVATIONAL_BOT_ID = "69ece87cf045acdc65d4b574";
 
 export default function FeedPage() {
   const router = useRouter();
@@ -24,18 +27,43 @@ export default function FeedPage() {
   const [ready, setReady] = useState(false);
   const [displayName, setDisplayName] = useState("");
 
-  async function fetchPosts(uid: string) {
-    try {
-      const res = await fetch(`/api/post?user_id=${uid}&limit=20`);
-      const data = await res.json();
-      if (data.success) setRants(data.data);
-    } catch {
-      console.error("Failed to fetch posts");
-    } finally {
-      setLoadingPosts(false);
-    }
-  }
+  // SSE state
+  const [pendingPosts, setPendingPosts] = useState<Post[]>([]);
+  const [streamStatus, setStreamStatus] = useState<
+    "connected" | "disconnected" | "reconnecting" | "idle"
+  >("idle");
+  const feedTopRef = useRef<HTMLDivElement>(null);
 
+  // ── SSE handlers ──────────────────────────────────────────────────────────
+  const handleSnapshot = useCallback((posts: Post[]) => {
+    setRants(posts);
+    setLoadingPosts(false);
+  }, []);
+
+  const handleNewPosts = useCallback((posts: Post[]) => {
+    setPendingPosts((prev) => {
+      const existingIds = new Set(prev.map((p) => p._id));
+      const fresh = posts.filter((p) => !existingIds.has(p._id));
+      return [...fresh, ...prev];
+    });
+  }, []);
+
+  const handleStatusChange = useCallback(
+    (status: "connected" | "disconnected" | "reconnecting") => {
+      setStreamStatus(status);
+    },
+    [],
+  );
+
+  useFeedStream({
+    userId,
+    enabled: ready && !!userId,
+    onSnapshot: handleSnapshot,
+    onNewPosts: handleNewPosts,
+    onStatusChange: handleStatusChange,
+  });
+
+  // ── Auth bootstrap ────────────────────────────────────────────────────────
   useEffect(() => {
     const savedAlias = localStorage.getItem("ss_alias");
     const savedUserId = localStorage.getItem("ss_user_id");
@@ -51,7 +79,6 @@ export default function FeedPage() {
     const savedDisplayName = localStorage.getItem("ss_displayName");
     const savedNickname = localStorage.getItem("ss_nickname");
 
-    // Batch all state updates together
     Promise.resolve().then(() => {
       setAlias(savedAlias);
       setUserId(savedUserId);
@@ -60,25 +87,11 @@ export default function FeedPage() {
       setIsAnonymous(savedAnon);
       setDisplayName(savedDisplayName || savedNickname || savedAlias);
       localStorage.removeItem("ss_newLogin");
-      fetchPosts(savedUserId);
       setTimeout(() => setReady(true), 50);
     });
   }, [router]);
 
-  const shownName = displayName || alias;
-  const shownInitials = shownName.slice(0, 2).toUpperCase();
-
-  function handleNewPost(post: Post) {
-    setRants((prev) => [post, ...prev]);
-  }
-
-  const MOTIVATIONAL_BOT_ID = "69ece87cf045acdc65d4b574";
-  const rantsRef = React.useRef<Post[]>([]);
-
-  useEffect(() => {
-    rantsRef.current = rants;
-  }, [rants]);
-
+  // ── Motivational bot ──────────────────────────────────────────────────────
   useEffect(() => {
     async function postMotivationalQuote() {
       try {
@@ -99,6 +112,7 @@ export default function FeedPage() {
         });
         const data = await postRes.json();
         if (postRes.ok && data.data) {
+          // Add directly to feed — no need to queue as pending
           setRants((prev) => [data.data, ...prev]);
         }
       } catch {
@@ -115,6 +129,26 @@ export default function FeedPage() {
     return () => clearTimeout(timeout);
   }, []);
 
+  // ── Helpers ───────────────────────────────────────────────────────────────
+  const shownName = displayName || alias;
+  const shownInitials = shownName.slice(0, 2).toUpperCase();
+
+  function flushPending() {
+    if (pendingPosts.length === 0) return;
+    setRants((prev) => {
+      const existingIds = new Set(prev.map((p) => p._id));
+      const fresh = pendingPosts.filter((p) => !existingIds.has(p._id));
+      return [...fresh, ...prev];
+    });
+    setPendingPosts([]);
+    feedTopRef.current?.scrollIntoView({ behavior: "smooth" });
+  }
+
+  function handleNewPost(post: Post) {
+    setRants((prev) => [post, ...prev]);
+  }
+
+  // ── Loading guard ─────────────────────────────────────────────────────────
   if (!ready) {
     return (
       <div className="min-h-screen bg-stone-50 flex items-center justify-center">
@@ -204,17 +238,28 @@ export default function FeedPage() {
               SafeSpace
             </h1>
           </div>
-          <div
-            className={`w-8 h-8 rounded-full ${avatarColor} flex items-center justify-center text-xs font-medium text-sage-800`}
-          >
-            {shownInitials}
+          <div className="flex items-center gap-2">
+            <ConnectionPill status={streamStatus} />
+            <div
+              className={`w-8 h-8 rounded-full ${avatarColor} flex items-center justify-center text-xs font-medium text-sage-800`}
+            >
+              {shownInitials}
+            </div>
           </div>
         </div>
+
+        {/* Desktop connection status */}
+        <div className="hidden md:flex items-center justify-end mb-2">
+          <ConnectionPill status={streamStatus} />
+        </div>
+
+        {/* Scroll anchor */}
+        <div ref={feedTopRef} />
 
         {/* Composer Prompt */}
         <div
           onClick={() => setIsComposerOpen(true)}
-          className="bg-white rounded-xl border border-stone-200 p-4 flex items-center gap-4 mb-8 cursor-pointer hover:border-sage-300 hover:bg-sage-50/30 transition-colors"
+          className="bg-white rounded-xl border border-stone-200 p-4 flex items-center gap-4 mb-4 cursor-pointer hover:border-sage-300 hover:bg-sage-50/30 transition-colors"
         >
           <div
             className={`w-10 h-10 rounded-full ${avatarColor} flex items-center justify-center text-sm font-medium text-sage-800 shrink-0`}
@@ -226,10 +271,23 @@ export default function FeedPage() {
           </div>
         </div>
 
+        {/* New posts banner */}
+        {pendingPosts.length > 0 && (
+          <button
+            onClick={flushPending}
+            className="w-full mb-4 flex items-center justify-center gap-2 py-2.5 rounded-xl bg-sage-500 hover:bg-sage-600 active:scale-[.98] transition-all text-white text-sm font-medium shadow-sm"
+          >
+            <ArrowUp size={15} />
+            {pendingPosts.length} new{" "}
+            {pendingPosts.length === 1 ? "post" : "posts"} — tap to load
+          </button>
+        )}
+
         {/* Rant Feed */}
         {loadingPosts ? (
-          <div className="flex justify-center py-10">
+          <div className="flex flex-col items-center gap-3 py-12">
             <div className="w-6 h-6 rounded-full border-2 border-sage-300 border-t-sage-600 animate-spin" />
+            <p className="text-xs text-stone-400">Connecting to live feed…</p>
           </div>
         ) : rants.length === 0 ? (
           <div className="text-center text-stone-400 font-lora text-sm py-10">
@@ -270,5 +328,47 @@ export default function FeedPage() {
         />
       )}
     </div>
+  );
+}
+
+// ── Connection status pill ────────────────────────────────────────────────────
+function ConnectionPill({
+  status,
+}: {
+  status: "connected" | "disconnected" | "reconnecting" | "idle";
+}) {
+  if (status === "idle") return null;
+
+  const cfg = {
+    connected: {
+      dot: (
+        <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 inline-block" />
+      ),
+      label: "Live",
+      cls: "text-emerald-600 bg-emerald-50 border-emerald-100",
+    },
+    reconnecting: {
+      dot: (
+        <span className="w-1.5 h-1.5 rounded-full border border-amber-400 border-t-transparent animate-spin inline-block" />
+      ),
+      label: "Reconnecting",
+      cls: "text-amber-600 bg-amber-50 border-amber-100",
+    },
+    disconnected: {
+      dot: <WifiOff size={10} />,
+      label: "Offline",
+      cls: "text-stone-400 bg-stone-50 border-stone-100",
+    },
+  } as const;
+
+  const { dot, label, cls } = cfg[status];
+
+  return (
+    <span
+      className={`flex items-center gap-1 text-[10px] font-medium px-2 py-0.5 rounded-full border ${cls}`}
+    >
+      {dot}
+      {label}
+    </span>
   );
 }
