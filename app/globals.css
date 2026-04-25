@@ -1,1 +1,43 @@
 @import "tailwindcss";
+
+@theme {
+  --color-sage-50: #f2f7f5;
+  --color-sage-100: #e0eeea;
+  --color-sage-200: #c2ddd6;
+  --color-sage-300: #9dc4bb;
+  --color-sage-400: #6fa89c;
+  --color-sage-500: #4a7c6f;
+  --color-sage-600: #3a6358;
+  --color-sage-700: #2e4f46;
+  --color-sage-800: #243d36;
+  --color-sage-900: #1a2e29;
+
+  --color-stone-50: #faf9f7;
+  --color-stone-100: #f2f0ec;
+  --color-stone-200: #e5e1da;
+  --color-stone-300: #ccc7bc;
+  --color-stone-400: #a8a199;
+  --color-stone-500: #7a7470;
+  --color-stone-600: #5c5854;
+
+  --font-lora: var(--font-lora), serif;
+  --font-dm-sans: var(--font-dm-sans), sans-serif;
+}
+
+@layer base {
+  :root {
+    --background: var(--color-stone-50);
+    --foreground: #243d36; /* sage-800 or stone-600 */
+  }
+
+  body {
+    background-color: var(--background);
+    color: var(--foreground);
+    @apply font-dm-sans antialiased text-stone-600;
+  }
+
+  /* Accessibility focus ring */
+  *:focus-visible {
+    @apply outline-none ring-2 ring-sage-400 ring-offset-2 ring-offset-stone-50;
+  }
+}
