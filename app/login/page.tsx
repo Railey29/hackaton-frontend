@@ -28,15 +28,12 @@ export default function LoginPage() {
 
   async function handleLogin() {
     if (!validate()) return;
-
     setIsLoading(true);
 
     try {
       const response = await fetch("/api/auth/login", {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           username: username.trim(),
           password: password,
@@ -46,7 +43,6 @@ export default function LoginPage() {
       const data = await response.json();
 
       if (!response.ok) {
-        // Handle API error response
         if (response.status === 401) {
           setErrors({ password: "Invalid username or password." });
         } else if (data.error) {
@@ -58,31 +54,26 @@ export default function LoginPage() {
         return;
       }
 
-      // Successful login - store token and user info
-      if (data.token) {
-        localStorage.setItem("ss_token", data.token);
-        localStorage.setItem("ss_alias", username.trim());
-        localStorage.setItem(
-          "ss_initials",
-          username.trim().slice(0, 2).toUpperCase(),
-        );
-        localStorage.setItem("ss_avatarColor", "bg-sage-300");
-        localStorage.setItem("ss_isAnonymous", "false");
-        localStorage.setItem("ss_newLogin", "true");
+      const userData = data;
 
-        // Optional: Store additional user info from response
-        if (data.user_id) {
-          localStorage.setItem("ss_user_id", data.user_id);
-        }
-        if (data.nickname) {
-          localStorage.setItem("ss_nickname", data.nickname);
-        }
-
-        setIsLoading(false);
-        router.push("/feed");
-      } else {
+      if (!userData?.token) {
         throw new Error("No token received");
       }
+
+      localStorage.setItem("ss_token", userData.token);
+      localStorage.setItem("ss_user_id", userData.user_id);
+      localStorage.setItem("ss_alias", userData.username);
+      localStorage.setItem("ss_nickname", userData.nickname);
+      localStorage.setItem(
+        "ss_initials",
+        userData.username.slice(0, 2).toUpperCase(),
+      );
+      localStorage.setItem("ss_avatarColor", "bg-sage-300");
+      localStorage.setItem("ss_isAnonymous", "false");
+      localStorage.setItem("ss_newLogin", "true");
+
+      setIsLoading(false);
+      router.push("/feed");
     } catch (error) {
       console.error("Login error:", error);
       setErrors({ username: "Network error. Please try again." });
@@ -96,7 +87,6 @@ export default function LoginPage() {
 
   return (
     <div className="min-h-screen bg-stone-50 flex items-center justify-center px-4">
-      {/* Subtle dot background */}
       <div
         className="fixed inset-0 opacity-[0.03] pointer-events-none"
         style={{

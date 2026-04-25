@@ -1,18 +1,7 @@
 "use client";
 
 import React, { useState } from "react";
-
-export interface Rant {
-  id: string;
-  alias: string;
-  initials: string;
-  avatarColor: string;
-  timestamp: string;
-  flair: string;
-  body: string;
-  feltCount: number;
-  replyCount: number;
-}
+import { Post } from "@/components/ComposerModal";
 
 interface Comment {
   id: string;
@@ -22,7 +11,8 @@ interface Comment {
 }
 
 interface RantCardProps {
-  rant: Rant;
+  rant: Post;
+  currentUserId: string;
 }
 
 function HeartIcon({ filled }: { filled: boolean }) {
@@ -104,7 +94,10 @@ function EyeIcon() {
 }
 
 function formatTimestamp(iso: string) {
-  return new Date(iso).toLocaleString("en-PH", {
+  if (!iso) return "Unknown date";
+  // Trim microseconds — JS only supports milliseconds
+  const cleaned = iso.replace(/(\.\d{3})\d+/, "$1");
+  return new Date(cleaned).toLocaleString("en-PH", {
     month: "short",
     day: "numeric",
     hour: "numeric",
@@ -112,27 +105,35 @@ function formatTimestamp(iso: string) {
   });
 }
 
-export function RantCard({ rant }: RantCardProps) {
-  const [liked, setLiked] = useState(false);
-  const [feltCount, setFeltCount] = useState(rant.feltCount);
+export function RantCard({ rant, currentUserId }: RantCardProps) {
+  const [liked, setLiked] = useState(
+    (rant.likes ?? []).includes(currentUserId),
+  );
+  const [feltCount, setFeltCount] = useState(rant.likes?.length ?? 0);
   const [showComments, setShowComments] = useState(false);
   const [comments, setComments] = useState<Comment[]>([]);
   const [commentInput, setCommentInput] = useState("");
   const [editing, setEditing] = useState(false);
-  const [editText, setEditText] = useState(rant.body);
-  const [bodyText, setBodyText] = useState(rant.body);
-  const [hidden, setHidden] = useState(false);
+  const [editText, setEditText] = useState(rant.content);
+  const [bodyText, setBodyText] = useState(rant.content);
+  const [hidden, setHidden] = useState(
+    (rant.hidden_by ?? []).includes(currentUserId),
+  );
+
+  const isOwner = rant.user_id === currentUserId;
 
   function handleLike() {
     const newLiked = !liked;
     setLiked(newLiked);
     setFeltCount(newLiked ? feltCount + 1 : feltCount - 1);
+    // TODO: call API toggle like
   }
 
   function handleSaveEdit() {
     if (!editText.trim()) return;
     setBodyText(editText.trim());
     setEditing(false);
+    // TODO: call API update post
   }
 
   function handleCancelEdit() {
@@ -146,16 +147,23 @@ export function RantCard({ rant }: RantCardProps) {
       ...prev,
       {
         id: Date.now().toString(),
-        alias: "quietstranger_7",
-        initials: "Q7",
+        alias: "you",
+        initials: currentUserId.slice(0, 2).toUpperCase(),
         text: commentInput.trim(),
       },
     ]);
     setCommentInput("");
+    // TODO: call API create comment
   }
 
   function handleDeleteComment(id: string) {
     setComments((prev) => prev.filter((c) => c.id !== id));
+    // TODO: call API delete comment
+  }
+
+  function handleHide() {
+    setHidden((h) => !h);
+    // TODO: call API toggle hide
   }
 
   return (
@@ -166,19 +174,21 @@ export function RantCard({ rant }: RantCardProps) {
     >
       {/* Header */}
       <div className="flex items-start gap-3 mb-3">
-        <div
-          className={`w-9 h-9 rounded-full ${rant.avatarColor} flex items-center justify-center text-xs font-medium text-sage-800 shrink-0`}
-        >
-          {rant.initials}
+        <div className="w-9 h-9 rounded-full bg-sage-200 flex items-center justify-center text-xs font-medium text-sage-800 shrink-0">
+          {rant.user_id?.slice(0, 2).toUpperCase() ?? "??"}
         </div>
         <div className="flex-1 min-w-0">
-          <div className="text-sm font-medium text-sage-800">{rant.alias}</div>
+          <div className="text-sm font-medium text-sage-800">
+            {isOwner ? "You" : `user_${rant.user_id?.slice(-4) ?? "????"}`}
+          </div>
           <div className="text-xs text-stone-400">
-            {formatTimestamp(rant.timestamp)}
+            {formatTimestamp(rant.created_at)}
           </div>
         </div>
         <span className="text-xs text-sage-700 bg-sage-100 rounded-full px-3 py-1 whitespace-nowrap">
-          {rant.flair}
+          {rant.moderation_label === "support_needed"
+            ? "Support needed"
+            : "Just venting"}
         </span>
       </div>
 
@@ -219,7 +229,6 @@ export function RantCard({ rant }: RantCardProps) {
 
       {/* Action Bar */}
       <div className="flex items-center gap-3 pt-3 border-t border-stone-100">
-        {/* Like */}
         <button
           onClick={handleLike}
           className={`flex items-center gap-1.5 text-sm transition-colors ${
@@ -230,21 +239,21 @@ export function RantCard({ rant }: RantCardProps) {
           <span>{feltCount} felt this</span>
         </button>
 
-        {/* Comments toggle */}
         <button
           onClick={() => setShowComments((s) => !s)}
           className="flex items-center gap-1.5 text-sm text-stone-400 hover:text-stone-600 transition-colors"
         >
           <ChatIcon />
           <span>
-            {comments.length} {comments.length === 1 ? "reply" : "replies"}
+            {rant.comment_count}{" "}
+            {rant.comment_count === 1 ? "reply" : "replies"}
           </span>
         </button>
 
         <div className="flex-1" />
 
-        {/* Edit */}
-        {!editing && (
+        {/* Edit — only owner */}
+        {isOwner && !editing && (
           <button
             onClick={() => {
               setEditText(bodyText);
@@ -259,7 +268,7 @@ export function RantCard({ rant }: RantCardProps) {
 
         {/* Hide/Unhide */}
         <button
-          onClick={() => setHidden((h) => !h)}
+          onClick={handleHide}
           className={`transition-colors p-1 rounded-lg ${
             hidden
               ? "text-stone-400 hover:text-stone-600 hover:bg-stone-50"
@@ -306,7 +315,7 @@ export function RantCard({ rant }: RantCardProps) {
           {/* Comment Input */}
           <div className="flex items-center gap-2 mt-1">
             <div className="w-7 h-7 rounded-full bg-sage-200 flex items-center justify-center text-[10px] font-medium text-sage-800 shrink-0">
-              W
+              {currentUserId.slice(0, 2).toUpperCase()}
             </div>
             <input
               value={commentInput}

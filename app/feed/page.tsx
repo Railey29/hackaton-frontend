@@ -5,27 +5,42 @@ import { useRouter } from "next/navigation";
 import { LeftSidebar } from "@/components/LeftSidebar";
 import { RightSidebar } from "@/components/RightSidebar";
 import { RantCard } from "@/components/RantCard";
-import { MOCK_RANTS, Rant } from "@/lib/rants";
+import { ComposerModal } from "@/components/ComposerModal";
+import { Post } from "@/components/ComposerModal";
 import { PenLine, X, Home, Clock, Menu } from "lucide-react";
 
 export default function FeedPage() {
   const router = useRouter();
-  const [alias, setAlias] = useState("quietstranger_7");
+  const [alias, setAlias] = useState("");
+  const [userId, setUserId] = useState("");
   const [initials, setInitials] = useState("Q7");
   const [avatarColor, setAvatarColor] = useState("bg-sage-300");
   const [isAnonymous, setIsAnonymous] = useState(false);
   const [isComposerOpen, setIsComposerOpen] = useState(false);
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [activePage, setActivePage] = useState<"feed" | "chat">("feed");
-  const [rants, setRants] = useState(() => MOCK_RANTS.map((r) => ({ ...r })));
-  const [text, setText] = useState("");
+  const [rants, setRants] = useState<Post[]>([]);
+  const [loadingPosts, setLoadingPosts] = useState(true);
   const [ready, setReady] = useState(false);
-
   const [displayName, setDisplayName] = useState("");
+
+  async function fetchPosts(uid: string) {
+    try {
+      const res = await fetch(`/api/post?user_id=${uid}&limit=20`);
+      const data = await res.json();
+      if (data.success) setRants(data.data);
+    } catch {
+      console.error("Failed to fetch posts");
+    } finally {
+      setLoadingPosts(false);
+    }
+  }
 
   useEffect(() => {
     const savedAlias = localStorage.getItem("ss_alias");
-    if (!savedAlias) {
+    const savedUserId = localStorage.getItem("ss_user_id");
+
+    if (!savedAlias || !savedUserId) {
       router.replace("/login");
       return;
     }
@@ -34,113 +49,27 @@ export default function FeedPage() {
     const savedColor = localStorage.getItem("ss_avatarColor") ?? "bg-sage-300";
     const savedAnon = localStorage.getItem("ss_isAnonymous") === "true";
     const savedDisplayName = localStorage.getItem("ss_displayName");
-    const isNewLogin = localStorage.getItem("ss_newLogin") === "true";
+    const savedNickname = localStorage.getItem("ss_nickname");
 
-    setAlias(savedAlias);
-    setInitials(savedInitials);
-    setAvatarColor(savedColor);
-    setIsAnonymous(savedAnon);
-
-    localStorage.removeItem("ss_newLogin");
-    if (savedDisplayName) {
-      setDisplayName(savedDisplayName);
-    } else {
-      setDisplayName(savedAlias);
-    }
-
-    setTimeout(() => setReady(true), 50);
+    // Batch all state updates together
+    Promise.resolve().then(() => {
+      setAlias(savedAlias);
+      setUserId(savedUserId);
+      setInitials(savedInitials);
+      setAvatarColor(savedColor);
+      setIsAnonymous(savedAnon);
+      setDisplayName(savedDisplayName || savedNickname || savedAlias);
+      localStorage.removeItem("ss_newLogin");
+      fetchPosts(savedUserId);
+      setTimeout(() => setReady(true), 50);
+    });
   }, [router]);
 
-  // Derived: what name shows on posts
   const shownName = displayName || alias;
   const shownInitials = shownName.slice(0, 2).toUpperCase();
 
-  function generateRandomName() {
-    const adjectives = [
-      "quiet",
-      "gentle",
-      "soft",
-      "calm",
-      "still",
-      "misty",
-      "golden",
-      "silver",
-      "velvet",
-      "cosmic",
-      "lunar",
-      "solar",
-      "wild",
-      "brave",
-      "bold",
-      "swift",
-      "clever",
-      "lucky",
-      "starry",
-      "dreamy",
-      "fuzzy",
-      "chill",
-      "tender",
-      "vivid",
-      "hollow",
-      "faded",
-      "neon",
-      "rusty",
-      "dusty",
-      "hazy",
-    ];
-    const nouns = [
-      "stranger",
-      "wanderer",
-      "soul",
-      "spirit",
-      "echo",
-      "ember",
-      "tide",
-      "breeze",
-      "cloud",
-      "storm",
-      "river",
-      "meadow",
-      "forest",
-      "horizon",
-      "whisper",
-      "shadow",
-      "spark",
-      "comet",
-      "petal",
-      "stone",
-      "bloom",
-      "wave",
-      "dusk",
-      "dawn",
-      "frost",
-      "hollow",
-      "valley",
-      "lantern",
-    ];
-    const adj = adjectives[Math.floor(Math.random() * adjectives.length)];
-    const noun = nouns[Math.floor(Math.random() * nouns.length)];
-    const num = Math.floor(Math.random() * 90) + 10;
-    setDisplayName(`${adj}${noun}_${num}`);
-  }
-
-  function handlePost() {
-    if (!text.trim()) return;
-    const newRant: Rant = {
-      id: Date.now().toString(),
-      alias: shownName,
-      initials: shownInitials,
-      avatarColor,
-      timestamp: new Date().toISOString(),
-      flair: "Just venting",
-      body: text.trim(),
-      feltCount: 0,
-      replyCount: 0,
-    };
-    MOCK_RANTS.unshift(newRant);
-    setRants([...MOCK_RANTS]);
-    setIsComposerOpen(false);
-    setText("");
+  function handleNewPost(post: Post) {
+    setRants((prev) => [post, ...prev]);
   }
 
   if (!ready) {
@@ -250,16 +179,30 @@ export default function FeedPage() {
             {shownInitials}
           </div>
           <div className="text-stone-400 font-lora text-[15px]">
-            What's on your mind today? You're safe here...
+            What&apos;s on your mind today? You&apos;re safe here...
           </div>
         </div>
 
         {/* Rant Feed */}
-        <div className="flex flex-col gap-4 pb-20 md:pb-8">
-          {rants.map((rant) => (
-            <RantCard key={rant.id} rant={rant} />
-          ))}
-        </div>
+        {loadingPosts ? (
+          <div className="flex justify-center py-10">
+            <div className="w-6 h-6 rounded-full border-2 border-sage-300 border-t-sage-600 animate-spin" />
+          </div>
+        ) : rants.length === 0 ? (
+          <div className="text-center text-stone-400 font-lora text-sm py-10">
+            No posts yet. Be the first to share!
+          </div>
+        ) : (
+          <div className="flex flex-col gap-4 pb-20 md:pb-8">
+            {rants.map((rant) => (
+              <RantCard
+                key={rant._id || `post-${rant.created_at}`}
+                rant={rant}
+                currentUserId={userId}
+              />
+            ))}
+          </div>
+        )}
       </main>
 
       <RightSidebar />
@@ -274,58 +217,14 @@ export default function FeedPage() {
 
       {/* Composer Modal */}
       {isComposerOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 backdrop-blur-sm px-4">
-          <div className="bg-white rounded-2xl w-full max-w-[520px] shadow-xl p-6 flex flex-col gap-4">
-            <div className="flex items-center justify-between">
-              <h2 className="font-lora text-lg text-sage-800 font-semibold">
-                Share a rant
-              </h2>
-              <button
-                onClick={() => setIsComposerOpen(false)}
-                className="text-stone-400 hover:text-stone-600 transition-colors"
-              >
-                <X size={20} />
-              </button>
-            </div>
-
-            <div className="flex items-center gap-3">
-              <div
-                className={`w-9 h-9 rounded-full ${avatarColor} flex items-center justify-center text-sm font-medium text-sage-800 shrink-0`}
-              >
-                {shownInitials}
-              </div>
-              <div>
-                <div className="text-sm font-medium text-sage-800">
-                  {shownName}
-                </div>
-                <div className="text-xs text-stone-400">
-                  {isAnonymous ? "anonymous" : ""}
-                </div>
-              </div>
-            </div>
-
-            <textarea
-              autoFocus
-              value={text}
-              onChange={(e) => setText(e.target.value)}
-              placeholder="What's on your mind? You're safe here..."
-              className="w-full min-h-[140px] resize-none border-none outline-none text-[15px] font-lora text-stone-700 placeholder:text-stone-300"
-            />
-
-            <div className="flex items-center justify-between pt-3 border-t border-stone-100">
-              <span className="text-xs text-stone-400">
-                {text.length} / 500
-              </span>
-              <button
-                onClick={handlePost}
-                disabled={!text.trim()}
-                className="bg-sage-500 hover:bg-sage-600 disabled:opacity-40 disabled:cursor-not-allowed text-white font-medium px-5 py-2 rounded-xl text-sm transition-colors"
-              >
-                Post
-              </button>
-            </div>
-          </div>
-        </div>
+        <ComposerModal
+          onClose={() => setIsComposerOpen(false)}
+          onPost={handleNewPost}
+          userId={userId}
+          alias={shownName}
+          initials={shownInitials}
+          avatarColor={avatarColor}
+        />
       )}
     </div>
   );

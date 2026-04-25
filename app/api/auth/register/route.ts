@@ -9,7 +9,7 @@ export async function POST(req: NextRequest) {
     if (!nickname || !username || !password) {
       return NextResponse.json(
         { error: "All fields are required." },
-        { status: 400 }
+        { status: 400 },
       );
     }
 
@@ -21,7 +21,7 @@ export async function POST(req: NextRequest) {
           "Content-Type": "application/json",
         },
         body: JSON.stringify({ nickname, username, password }),
-      }
+      },
     );
 
     const data = await response.json();
@@ -29,16 +29,16 @@ export async function POST(req: NextRequest) {
     if (!response.ok) {
       return NextResponse.json(
         { error: data.detail || "Registration failed." },
-        { status: response.status }
+        { status: response.status },
       );
     }
 
     return NextResponse.json(data, { status: 201 });
-
   } catch (error) {
+    console.log("Registration error:", error); // idagdag ito
     return NextResponse.json(
       { error: "Internal Server Error" },
-      { status: 500 }
+      { status: 500 },
     );
   }
 }
