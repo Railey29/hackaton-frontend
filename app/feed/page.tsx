@@ -107,10 +107,15 @@ export default function FeedPage() {
         const quoteRes = await fetch(
           "https://hackathon-backend-production-c1f0.up.railway.app/motivational/",
         );
+
+        // ✅ FIX: stop early if the HTTP response itself is an error (e.g. 500 from Gemini failure)
+        // Previously, only network-level errors were caught; HTTP errors like 500 slipped through
+        if (!quoteRes.ok) return;
+
         const quoteData = await quoteRes.json();
         const quote: string = quoteData?.data?.quote;
 
-        // ✅ FIX: skip if no quote or backend returned an error field
+        // ✅ skip if no quote or backend returned an error field
         // prevents fallback messages like "May technical difficulties..."
         // from being posted to the feed when Gemini fails
         if (!quote || quoteData?.data?.error) return;
@@ -128,6 +133,7 @@ export default function FeedPage() {
           setRants((prev) => [data.data, ...prev]);
         }
       } catch {
+        // silent fail — network errors should never post anything to the feed
         console.error("Failed to post motivational quote");
       }
     }
