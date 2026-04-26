@@ -206,7 +206,7 @@ export default function ChatPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ action: "analyze", stressData: finalData }),
       });
-      const data = await res.json();
+      const data = await res.json().catch(() => null);
       console.log("[Assessment] API response:", data);
       const rawReply =
         typeof data?.reply === "string" ? data.reply.trim() : "";
@@ -289,8 +289,8 @@ export default function ChatPage() {
             previousData: stressData,
           }),
         });
-        const data = await res.json();
-        addBotMessage(data.reply ?? "I'm here. Tell me more.");
+        const data = await res.json().catch(() => null);
+        addBotMessage(data?.reply ?? "I'm here. Tell me more.");
       } catch {
         addBotMessage("Something went wrong. I'm still here — try again?");
       } finally {
@@ -320,11 +320,11 @@ export default function ChatPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ action: "chat", message: textToSend }),
       });
-      const data = await res.json();
+      const data = await res.json().catch(() => null);
       const botMsg: Message = {
         id: (Date.now() + 1).toString(),
         sender: "bot",
-        text: data.reply ?? "I'm here. Tell me more.",
+        text: data?.reply ?? "I'm here. Tell me more.",
       };
       setMessages((prev) => [...prev, botMsg]);
     } catch (err) {

@@ -1,8 +1,22 @@
 import { NextRequest, NextResponse } from "next/server";
 import { GoogleGenerativeAI } from "@google/generative-ai";
 
-const genai = new GoogleGenerativeAI(process.env.GEMINI_API_KEY!);
-const model = genai.getGenerativeModel({ model: "gemini-2.5-flash" });
+export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
+
+let cachedModel:
+  | ReturnType<GoogleGenerativeAI["getGenerativeModel"]>
+  | null = null;
+
+function getModel() {
+  if (cachedModel) return cachedModel;
+  const apiKey = process.env.GEMINI_API_KEY;
+  if (!apiKey || !apiKey.trim()) return null;
+
+  const genai = new GoogleGenerativeAI(apiKey);
+  cachedModel = genai.getGenerativeModel({ model: "gemini-2.5-flash" });
+  return cachedModel;
+}
 
 const DEFAULT_DISALLOWED_REPLY =
   "⚠️ Only stress or mental health related input is allowed.";
@@ -40,6 +54,14 @@ const FALLBACK_ALLOW_KEYWORDS = [
 function fallbackIsAllowed(text: string) {
   const t = (text || "").toLowerCase();
   return FALLBACK_ALLOW_KEYWORDS.some((kw) => t.includes(kw));
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function getFiniteNumber(value: unknown): number | null {
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
 }
 
 async function isAllowedMessage(text: string): Promise<boolean> {
@@ -83,30 +105,83 @@ function getStressLevel(score: number) {
 }
 
 export async function POST(req: NextRequest) {
-  const body = await req.json();
-  const { action } = body;
+  let body: unknown;
+  try {
+    body = await req.json();
+  } catch {
+    return NextResponse.json(
+      { reply: "Invalid request body.", error: "invalid_json" },
+      { status: 400 },
+    );
+  }
 
-  // Handle different actions
-  if (action === "analyze" && body.stressData) {
-    const { fin, prices, health, school, family } = body.stressData;
-    
-    console.log("Analyzing stress data:", { fin, prices, health, school, family });
-    
-    const stressScore = computeStressScore(fin, prices, health, school, family);
-    const stressLevel = getStressLevel(stressScore);
+  const model = getModel();
+  if (!model) {
+    return NextResponse.json(
+      {
+        reply: "AI is not configured on the server.",
+        error: "missing_gemini_api_key",
+      },
+      { status: 500 },
+    );
+  }
 
-    // Find highest stress areas for targeted advice
-    const areas = [
-      { name: "Finances", score: fin },
-      { name: "Prices", score: prices },
-      { name: "Health", score: health },
-      { name: "School/Work", score: school },
-      { name: "Family", score: family },
-    ];
-    const highestAreas = [...areas].sort((a, b) => b.score - a.score).slice(0, 2);
-    const highestAreaNames = highestAreas.map((a) => a.name).join(", ");
+  try {
+    const bodyObj = isRecord(body) ? body : {};
+    const action = typeof bodyObj.action === "string" ? bodyObj.action : "";
 
-    const prompt = `
+    // Handle different actions
+    if (action === "analyze" && isRecord(bodyObj.stressData)) {
+      const fin = getFiniteNumber(bodyObj.stressData.fin);
+      const prices = getFiniteNumber(bodyObj.stressData.prices);
+      const health = getFiniteNumber(bodyObj.stressData.health);
+      const school = getFiniteNumber(bodyObj.stressData.school);
+      const family = getFiniteNumber(bodyObj.stressData.family);
+
+      if (
+        fin === null ||
+        prices === null ||
+        health === null ||
+        school === null ||
+        family === null
+      ) {
+        return NextResponse.json(
+          { reply: "Invalid stress data.", error: "invalid_stress_data" },
+          { status: 400 },
+        );
+      }
+
+      console.log("Analyzing stress data:", {
+        fin,
+        prices,
+        health,
+        school,
+        family,
+      });
+
+      const stressScore = computeStressScore(
+        fin,
+        prices,
+        health,
+        school,
+        family,
+      );
+      const stressLevel = getStressLevel(stressScore);
+
+      // Find highest stress areas for targeted advice
+      const areas = [
+        { name: "Finances", score: fin },
+        { name: "Prices", score: prices },
+        { name: "Health", score: health },
+        { name: "School/Work", score: school },
+        { name: "Family", score: family },
+      ];
+      const highestAreas = [...areas]
+        .sort((a, b) => b.score - a.score)
+        .slice(0, 2);
+      const highestAreaNames = highestAreas.map((a) => a.name).join(", ");
+
+      const prompt = `
 You are a stress analysis assistant.
 Do not repeat the user's data back to them and do not mention any exact numbers or scores.
 Only analyze their stress level and give practical advice.
@@ -131,44 +206,68 @@ Only analyze their stress level and give practical advice.
 6. Do NOT ask follow-up questions.
 `;
 
-    const result = await model.generateContent(prompt);
-    return NextResponse.json({ 
-      reply: result.response.text(), 
-      stressScore: stressScore.toFixed(0),
-      stressLevel
-    });
-  }
-
-  // Handle stress follow-up context
-  if (action === "chat" && body.context === "stress_follow_up" && body.previousData) {
-    const { message, previousData } = body;
-
-    const allowed = await isAllowedMessage(String(message ?? ""));
-    if (!allowed) {
-      return NextResponse.json({ reply: DEFAULT_DISALLOWED_REPLY });
+      const result = await model.generateContent(prompt);
+      return NextResponse.json({
+        reply: result.response.text(),
+        stressScore: stressScore.toFixed(0),
+        stressLevel,
+      });
     }
 
-    const score = computeStressScore(
-      previousData.fin,
-      previousData.prices,
-      previousData.health,
-      previousData.school,
-      previousData.family,
-    );
-    const level = getStressLevel(score);
-    
-    const prompt = `
+    // Handle stress follow-up context
+    if (
+      action === "chat" &&
+      bodyObj.context === "stress_follow_up" &&
+      isRecord(bodyObj.previousData)
+    ) {
+      const message = String(bodyObj.message ?? "");
+      const previousData = bodyObj.previousData;
+
+      const allowed = await isAllowedMessage(String(message ?? ""));
+      if (!allowed) {
+        return NextResponse.json({ reply: DEFAULT_DISALLOWED_REPLY });
+      }
+
+      const fin = getFiniteNumber(previousData.fin);
+      const prices = getFiniteNumber(previousData.prices);
+      const health = getFiniteNumber(previousData.health);
+      const school = getFiniteNumber(previousData.school);
+      const family = getFiniteNumber(previousData.family);
+
+      if (
+        fin === null ||
+        prices === null ||
+        health === null ||
+        school === null ||
+        family === null
+      ) {
+        return NextResponse.json(
+          { reply: "Invalid stress data.", error: "invalid_previous_data" },
+          { status: 400 },
+        );
+      }
+
+      const score = computeStressScore(
+        fin,
+        prices,
+        health,
+        school,
+        family,
+      );
+      const level = getStressLevel(score);
+
+      const prompt = `
 You are a stress analysis assistant.
 
 Only respond to stress or mental health related concerns.
 Do not mention any exact numbers or scores. Do not repeat the user's data back to them.
 
 Given:
-- Financial stress: ${previousData.fin}/10
-- Price stress: ${previousData.prices}/10
-- Health stress: ${previousData.health}/10
-- School/Job stress: ${previousData.school}/10
-- Family stress: ${previousData.family}/10
+- Financial stress: ${fin}/10
+- Price stress: ${prices}/10
+- Health stress: ${health}/10
+- School/Job stress: ${school}/10
+- Family stress: ${family}/10
 
 Computed stress score: ${score.toFixed(0)}/100
 Stress level: ${level}
@@ -185,19 +284,19 @@ Task:
 6. Keep response short (4-5 sentences only)
 `;
 
-    const result = await model.generateContent(prompt);
-    return NextResponse.json({ reply: result.response.text() });
-  }
-
-  // Regular chat message
-  if (action === "chat" && body.message) {
-    const message = String(body.message ?? "");
-    const allowed = await isAllowedMessage(message);
-    if (!allowed) {
-      return NextResponse.json({ reply: DEFAULT_DISALLOWED_REPLY });
+      const result = await model.generateContent(prompt);
+      return NextResponse.json({ reply: result.response.text() });
     }
 
-    const prompt = `
+    // Regular chat message
+    if (action === "chat" && typeof bodyObj.message === "string") {
+      const message = bodyObj.message;
+      const allowed = await isAllowedMessage(message);
+      if (!allowed) {
+        return NextResponse.json({ reply: DEFAULT_DISALLOWED_REPLY });
+      }
+
+      const prompt = `
 You are a stress analysis assistant.
 
 Only respond to stress or mental health related concerns.
@@ -212,12 +311,20 @@ Task:
 3. Use simple English
 4. Keep it short (4-5 sentences)
 `;
-    const result = await model.generateContent(prompt);
-    return NextResponse.json({ reply: result.response.text() });
-  }
+      const result = await model.generateContent(prompt);
+      return NextResponse.json({ reply: result.response.text() });
+    }
 
-  // Default fallback
-  const { message } = body;
-  const result = await model.generateContent(message || "Hello");
-  return NextResponse.json({ reply: result.response.text() });
+    // Default fallback
+    const message =
+      typeof bodyObj.message === "string" ? bodyObj.message : "Hello";
+    const result = await model.generateContent(message);
+    return NextResponse.json({ reply: result.response.text() });
+  } catch (err) {
+    console.error("[/api/gemini] error:", err);
+    return NextResponse.json(
+      { reply: "Something went wrong. Please try again.", error: "gemini_error" },
+      { status: 500 },
+    );
+  }
 }
