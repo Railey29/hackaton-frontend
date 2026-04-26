@@ -57,9 +57,6 @@ export default function FeedPage() {
     });
   }, []);
 
-  // ✅ FIX: was not wrapped in useCallback before — caused new reference every
-  // render → useFeedStream's connect() changed → SSE reconnected on every
-  // render → constant state updates → infinite re-render loop
   const handleStatusChange = useCallback(
     (status: "connected" | "disconnected" | "reconnecting") => {
       setStreamStatus(status);
@@ -112,7 +109,11 @@ export default function FeedPage() {
         );
         const quoteData = await quoteRes.json();
         const quote: string = quoteData?.data?.quote;
-        if (!quote) return;
+
+        // ✅ FIX: skip if no quote or backend returned an error field
+        // prevents fallback messages like "May technical difficulties..."
+        // from being posted to the feed when Gemini fails
+        if (!quote || quoteData?.data?.error) return;
 
         const postRes = await fetch("/api/post", {
           method: "POST",
@@ -131,14 +132,13 @@ export default function FeedPage() {
       }
     }
 
-    // ✅ FIX: removed the setTimeout wrapper — the interval cleanup (clearInterval)
-    // was buried inside the setTimeout callback's return value, which React never
-    // sees. React only calls the function returned directly from useEffect.
-    // Without this fix, every remount stacked a new interval that never got cleared,
-    // causing requests to pile up and fire far more often than every 2 hours.
+    // ✅ FIX: removed setTimeout wrapper — clearInterval was inside the
+    // setTimeout callback's return value which React never calls.
+    // Every remount stacked a new interval that never cleared,
+    // causing Gemini to be hit far more than every 2 hours.
     postMotivationalQuote();
     const interval = setInterval(postMotivationalQuote, 2 * 60 * 60 * 1000);
-    return () => clearInterval(interval); // ✅ React now correctly clears this on unmount
+    return () => clearInterval(interval);
   }, []);
 
   // ── Helpers ───────────────────────────────────────────────────────────────
